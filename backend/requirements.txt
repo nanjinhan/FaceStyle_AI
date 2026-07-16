@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+pydantic>=2.6
+pyjwt>=2.8
+python-multipart>=0.0.9
+
+# 선택: 호스트 업로드 시 서버측 얼굴 미리보기 검출용 (없으면 FACE-01은 빈 목록 반환,
+# 클라이언트 온디바이스 MediaPipe 검출만으로도 MVP 동작에는 지장 없음)
+# opencv-python-headless>=4.9
