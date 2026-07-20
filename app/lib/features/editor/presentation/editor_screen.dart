@@ -5,6 +5,7 @@ import '../../../core/config.dart';
 import '../../../core/theme/member_colors.dart';
 import '../../room/application/room_controller.dart';
 import '../../room/domain/session_models.dart';
+import '../rendering/photo_filter.dart';
 
 /// 명세 3·4 공용 보정 에디터. 실시간 방과 앨범 비동기 보정이 같은 화면을 쓴다.
 ///
@@ -12,8 +13,9 @@ import '../../room/domain/session_models.dart';
 ///  - RoomSocket state_sync → 전역 파라미터 슬라이더에 반영, 값 변경 시 edit 전송
 ///  - 다른 참여자 프레즌스: "OO — △△ 편집 중" 라벨 (색상 점)
 ///  - undo/redo 전송
+///  - 전역 파라미터 → 이미지 실시간 렌더링 (A7, `rendering/photo_filter.dart`)
 /// TODO(M1+): 얼굴 클레임 UI + 본인/타인 영역 잠금, 완료 체크(전원 완료 확정, B7)
-/// TODO(M4): MLKit 얼굴검출 + 파라미터→이미지 렌더링 파이프라인 (로드맵 A7)
+/// TODO(M4): MLKit 얼굴검출 + 얼굴별 워핑·스무딩 렌더링 (A7 확장)
 class EditorScreen extends ConsumerWidget {
   const EditorScreen({super.key, required this.sessionId, required this.photoId});
 
@@ -102,7 +104,7 @@ class EditorScreen extends ConsumerWidget {
     return Column(
       children: [
         _presenceBar(context, state),
-        Expanded(child: _canvas(context, photo)),
+        Expanded(child: _canvas(context, photo, editState)),
         _sliderPanel(context, state, controller, editState),
       ],
     );
@@ -154,21 +156,26 @@ class EditorScreen extends ConsumerWidget {
     return null;
   }
 
-  Widget _canvas(BuildContext context, Photo photo) {
+  /// 원본 이미지에 전역 보정 파라미터를 실시간 적용해 보여준다 (A7).
+  ///
+  /// 길게 누르면 보정 전 원본과 비교할 수 있다.
+  Widget _canvas(BuildContext context, Photo photo, EditState editState) {
     final url = '${AppConfig.apiBaseUrl}${photo.url}';
     return Container(
       color: Colors.black,
       alignment: Alignment.center,
-      child: Image.network(
-        url,
-        fit: BoxFit.contain,
-        // TODO(A7): 여기서 editState 파라미터를 ColorFilter/워핑으로 실제 반영.
-        errorBuilder: (context, error, stack) => const _Notice(
-          icon: Icons.broken_image_outlined,
-          message: '사진을 불러오지 못했어요.',
+      child: _CompareOnHold(
+        editState: editState,
+        child: Image.network(
+          url,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stack) => const _Notice(
+            icon: Icons.broken_image_outlined,
+            message: '사진을 불러오지 못했어요.',
+          ),
+          loadingBuilder: (context, child, progress) =>
+              progress == null ? child : const CircularProgressIndicator(),
         ),
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : const CircularProgressIndicator(),
       ),
     );
   }
@@ -207,6 +214,47 @@ class EditorScreen extends ConsumerWidget {
     final owner = state.locks[path];
     if (owner == null || owner == state.myMemberId) return null;
     return MemberColors.fromHex(null, fallbackSeed: owner);
+  }
+}
+
+/// 길게 누르는 동안 보정을 끄고 원본을 보여준다 (보정 전/후 비교).
+class _CompareOnHold extends StatefulWidget {
+  const _CompareOnHold({required this.editState, required this.child});
+
+  final EditState editState;
+  final Widget child;
+
+  @override
+  State<_CompareOnHold> createState() => _CompareOnHoldState();
+}
+
+class _CompareOnHoldState extends State<_CompareOnHold> {
+  bool _showOriginal = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPressStart: (_) => setState(() => _showOriginal = true),
+      onLongPressEnd: (_) => setState(() => _showOriginal = false),
+      onLongPressCancel: () => setState(() => _showOriginal = false),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          FilteredPhoto(
+            editState: _showOriginal ? null : widget.editState,
+            child: widget.child,
+          ),
+          if (_showOriginal)
+            const Positioned(
+              top: 12,
+              child: Chip(
+                visualDensity: VisualDensity.compact,
+                label: Text('원본'),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 
