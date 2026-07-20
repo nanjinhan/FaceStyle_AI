@@ -68,9 +68,13 @@ class Photo(Base):
     height = Column(Integer, default=0)
     order_index = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # 전원 완료로 최종본이 확정된 시점. 확정 후에는 편집이 잠긴다(명세 3·4장 "완료 확정").
+    finalized_at = Column(DateTime, nullable=True)
+    final_version = Column(Integer, nullable=True)  # 확정 시점의 파라미터 버전(스냅샷 기준)
 
     session = relationship("EditSession", back_populates="photos")
     faces = relationship("Face", back_populates="photo", cascade="all, delete-orphan")
+    completions = relationship("PhotoCompletion", back_populates="photo", cascade="all, delete-orphan")
 
 
 class Face(Base):
@@ -86,6 +90,25 @@ class Face(Base):
     claimed_by_member_id = Column(String, ForeignKey("members.id"), nullable=True)
 
     photo = relationship("Photo", back_populates="faces")
+
+
+class PhotoCompletion(Base):
+    """사진 × 멤버 완료 체크 (명세 3·4장 "완료 확정").
+
+    "사진 속 전원이 완료 체크 시 최종본 확정"에서 말하는 전원은 앨범 진행 상태 정의
+    ("사진 속 클레임 인원 기준으로 계산")에 맞춰 **그 사진의 얼굴을 클레임한 멤버**를 뜻한다.
+    """
+
+    __tablename__ = "photo_completions"
+
+    id = Column(String, primary_key=True, default=lambda: new_id("done"))
+    photo_id = Column(String, ForeignKey("photos.id"), nullable=False)
+    member_id = Column(String, ForeignKey("members.id"), nullable=False)
+    completed_at = Column(DateTime, default=datetime.utcnow)
+
+    photo = relationship("Photo", back_populates="completions")
+
+    __table_args__ = (UniqueConstraint("photo_id", "member_id", name="uq_photo_member_completion"),)
 
 
 class EditStateRecord(Base):

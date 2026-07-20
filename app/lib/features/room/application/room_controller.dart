@@ -33,10 +33,12 @@ class RoomState {
     this.session,
     this.currentPhotoId,
     this.editStates = const {},
+    this.completions = const {},
     this.presence = const {},
     this.locks = const {},
     this.myMemberId,
     this.error,
+    this.rejection,
   });
 
   final RoomConnection connection;
@@ -46,6 +48,9 @@ class RoomState {
   /// photoId → EditState (state_sync/edit_applied 로 갱신되는 라이브 파라미터).
   final Map<String, EditState> editStates;
 
+  /// photoId → 완료 확정 현황 (completion_update/finalized 로 갱신).
+  final Map<String, CompletionState> completions;
+
   /// memberId → 프레즌스.
   final Map<String, PresenceInfo> presence;
 
@@ -54,6 +59,9 @@ class RoomState {
 
   final String? myMemberId;
   final String? error;
+
+  /// 서버가 마지막으로 거부한 편집 사유 (edit_rejected). UI에서 한 번 표시하고 지운다.
+  final String? rejection;
 
   Photo? get currentPhoto {
     if (session == null) return null;
@@ -70,25 +78,39 @@ class RoomState {
     return p == null ? null : editStates[p.id];
   }
 
+  /// 사진의 완료 현황. 아직 서버 소식이 없으면 세션 로드 시점 값으로 대체한다.
+  CompletionState completionOf(String photoId) {
+    final live = completions[photoId];
+    if (live != null) return live;
+    for (final p in session?.photos ?? const <Photo>[]) {
+      if (p.id == photoId) return p.completion;
+    }
+    return const CompletionState();
+  }
+
   RoomState copyWith({
     RoomConnection? connection,
     SessionDetail? session,
     String? currentPhotoId,
     Map<String, EditState>? editStates,
+    Map<String, CompletionState>? completions,
     Map<String, PresenceInfo>? presence,
     Map<String, String>? locks,
     String? myMemberId,
     String? error,
+    String? rejection,
   }) =>
       RoomState(
         connection: connection ?? this.connection,
         session: session ?? this.session,
         currentPhotoId: currentPhotoId ?? this.currentPhotoId,
         editStates: editStates ?? this.editStates,
+        completions: completions ?? this.completions,
         presence: presence ?? this.presence,
         locks: locks ?? this.locks,
         myMemberId: myMemberId ?? this.myMemberId,
         error: error,
+        rejection: rejection,
       );
 }
 
@@ -203,8 +225,46 @@ class RoomController extends Notifier<RoomState> {
         _onFaceClaim(msg['faceId'] as String?, null);
       case 'member_kicked':
         _onMemberGone(msg['memberId'] as String?);
+      case 'completion_update':
+        _setCompletion(msg['photoId'] as String?, CompletionState.fromJson(msg));
+      case 'finalized':
+        _onFinalized(msg);
+      case 'edit_rejected':
+        state = state.copyWith(rejection: msg['reason'] as String?);
     }
   }
+
+  void _setCompletion(String? photoId, CompletionState completion) {
+    if (photoId == null) return;
+    state = state.copyWith(completions: {...state.completions, photoId: completion});
+  }
+
+  /// 전원 완료 → 서버가 최종본을 확정했다. 확정 시점 파라미터로 맞추고 편집을 잠근다.
+  void _onFinalized(Map<String, dynamic> msg) {
+    final photoId = msg['photoId'] as String?;
+    if (photoId == null) return;
+
+    final editStates = {...state.editStates};
+    final snapshot = msg['editState'] as Map<String, dynamic>?;
+    if (snapshot != null) {
+      editStates[photoId] = EditState.fromJson(snapshot);
+    }
+    final before = state.completionOf(photoId);
+    state = state.copyWith(
+      editStates: editStates,
+      completions: {
+        ...state.completions,
+        photoId: CompletionState(
+          completed: before.completed,
+          requiredMembers: before.requiredMembers,
+          finalized: true,
+        ),
+      },
+    );
+  }
+
+  /// 표시한 거부 사유를 지운다 (같은 메시지가 계속 뜨지 않도록).
+  void clearRejection() => state = state.copyWith(rejection: null);
 
   void _onStateSync(Map<String, dynamic> msg) {
     final photos = (msg['photos'] as Map<String, dynamic>?) ?? const {};
@@ -224,9 +284,14 @@ class RoomController extends Notifier<RoomState> {
     (msg['locks'] as Map<String, dynamic>?)?.forEach((path, memberId) {
       locks[path] = memberId as String;
     });
+    final completions = <String, CompletionState>{};
+    (msg['completions'] as Map<String, dynamic>?)?.forEach((photoId, raw) {
+      completions[photoId] = CompletionState.fromJson(raw as Map<String, dynamic>);
+    });
     state = state.copyWith(
       connection: RoomConnection.connected,
       editStates: editStates.isEmpty ? state.editStates : editStates,
+      completions: completions.isEmpty ? state.completions : completions,
       presence: presence,
       locks: locks,
     );
@@ -321,6 +386,16 @@ class RoomController extends Notifier<RoomState> {
   void lockParam(String path) => _socket?.lockParam(path);
   void unlockParam(String path) => _socket?.unlockParam(path);
   void reaction(String emoji) => _socket?.reaction(emoji);
+
+  /// 항목 하나만 원본으로 되돌린다 (기능별 리셋).
+  void resetParam(String photoId, String path) => _socket?.resetParam(photoId, path);
+
+  /// 완료 체크/해제. 전원이 완료하면 서버가 확정하고 `finalized`를 보낸다.
+  ///
+  /// 확정 여부는 서버가 판단하므로 여기서 낙관적 반영은 하지 않는다
+  /// (내 체크만 보고 확정된 줄 알았다가 되돌아가는 깜빡임을 막는다).
+  void setComplete(String photoId, {required bool done}) =>
+      _socket?.complete(photoId, done: done);
 
   // ---- helpers ---------------------------------------------------------------
 

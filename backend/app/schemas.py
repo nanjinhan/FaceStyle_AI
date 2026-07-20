@@ -38,6 +38,10 @@ class PhotoOut(BaseModel):
     height: int
     faces: list[FaceOut]
     editState: dict[str, Any]
+    # 완료 확정 현황 — completedBy ⊇ requiredBy 가 되면 서버가 자동 확정한다
+    completedBy: list[str] = []
+    requiredBy: list[str] = []
+    finalized: bool = False
 
 
 class MemberOut(BaseModel):

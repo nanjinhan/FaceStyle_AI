@@ -37,6 +37,16 @@ class EditorScreen extends ConsumerWidget {
     final state = ref.watch(roomControllerProvider(sessionId));
     final controller = ref.read(roomControllerProvider(sessionId).notifier);
 
+    // 서버가 편집을 거부하면 그 이유를 알려준다 ("OO님의 영역이에요" 등).
+    ref.listen(roomControllerProvider(sessionId), (prev, next) {
+      final reason = next.rejection;
+      if (reason == null || reason == prev?.rejection) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(reason)));
+      controller.clearRejection();
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('보정하기'),
@@ -62,16 +72,35 @@ class EditorScreen extends ConsumerWidget {
               const SnackBar(content: Text('개인 저장은 렌더링 파이프라인 연동 후 지원돼요 (M4)')),
             ),
           ),
-          // TODO(B7): 완료 체크 → 전원 완료 시 서버가 finalized 브로드캐스트
-          TextButton(
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('완료 확정은 백엔드 complete 프로토콜 연동 후 (B7)')),
-            ),
-            child: const Text('완료'),
-          ),
+          _completeButton(context, state, controller),
         ],
       ),
       body: _body(context, ref, state, controller),
+    );
+  }
+
+  /// 완료 체크 버튼. 전원이 누르면 서버가 최종본을 확정한다.
+  Widget _completeButton(BuildContext context, RoomState state, RoomController controller) {
+    final completion = state.completionOf(photoId);
+    if (completion.finalized) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12),
+        child: Center(child: Text('확정됨')),
+      );
+    }
+
+    final iAmDone = completion.isDoneBy(state.myMemberId);
+    // 얼굴을 지정하지 않은 사람은 완료 대상이 아니다 (서버도 같은 기준으로 거부한다).
+    final canComplete = completion.isRequiredOf(state.myMemberId);
+
+    return TextButton.icon(
+      onPressed: canComplete
+          ? () => controller.setComplete(photoId, done: !iAmDone)
+          : () => ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('먼저 "이게 나예요"로 내 얼굴을 지정해주세요')),
+              ),
+      icon: Icon(iAmDone ? Icons.check_circle : Icons.check_circle_outline),
+      label: Text(iAmDone ? '완료함' : '완료'),
     );
   }
 
@@ -104,9 +133,64 @@ class EditorScreen extends ConsumerWidget {
     return Column(
       children: [
         _presenceBar(context, state),
+        _completionBar(context, state),
         Expanded(child: _canvas(context, photo, editState)),
         _sliderPanel(context, state, controller, editState),
       ],
+    );
+  }
+
+  /// 완료 현황 — "2/3 완료" + 누가 아직인지. 확정되면 잠금 안내로 바뀐다.
+  Widget _completionBar(BuildContext context, RoomState state) {
+    final completion = state.completionOf(photoId);
+    if (completion.hasNobody) return const SizedBox.shrink();
+
+    final scheme = Theme.of(context).colorScheme;
+    if (completion.finalized) {
+      return Container(
+        width: double.infinity,
+        color: scheme.primaryContainer,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.lock_outline, size: 18, color: scheme.onPrimaryContainer),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '모두 완료! 최종본이 저장됐어요',
+                style: TextStyle(color: scheme.onPrimaryContainer, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final waiting = completion.requiredMembers
+        .where((id) => !completion.completed.contains(id))
+        .map((id) => _nicknameOf(state, id) ?? '참여자')
+        .toList();
+
+    return Container(
+      width: double.infinity,
+      color: scheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Text(
+            '${completion.doneCount}/${completion.totalCount} 완료',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              waiting.isEmpty ? '확정하는 중…' : '${waiting.join(", ")} 님을 기다리는 중',
+              style: TextStyle(color: scheme.onSurfaceVariant),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -186,6 +270,9 @@ class EditorScreen extends ConsumerWidget {
     RoomController controller,
     EditState editState,
   ) {
+    // 확정된 사진은 서버가 편집을 거부하므로 UI에서도 미리 잠근다.
+    final finalized = state.completionOf(photoId).finalized;
+
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: SizedBox(
@@ -197,11 +284,13 @@ class EditorScreen extends ConsumerWidget {
               _GlobalSlider(
                 control: c,
                 value: (editState.valueAt('global.${c.key}') as num?)?.toDouble() ?? 0,
-                lockedBy: _lockOwner(state, 'global.${c.key}'),
+                lockedBy: finalized ? Theme.of(context).disabledColor : _lockOwner(state, 'global.${c.key}'),
                 onChanged: (v) {
                   controller.reportPresence(tool: c.label, region: 'global');
                   controller.editGlobal(photoId, c.key, v.round());
                 },
+                // 길게 눌러 이 항목만 원본으로 되돌린다 (기능별 리셋).
+                onReset: finalized ? null : () => controller.resetParam(photoId, 'global.${c.key}'),
               ),
           ],
         ),
@@ -271,15 +360,18 @@ class _GlobalSlider extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.lockedBy,
+    this.onReset,
   });
 
   final _Control control;
   final double value;
   final ValueChanged<double> onChanged;
   final Color? lockedBy;
+  final VoidCallback? onReset;
 
   @override
   Widget build(BuildContext context) {
+    final locked = lockedBy != null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
@@ -294,12 +386,23 @@ class _GlobalSlider extends StatelessWidget {
               value: value.clamp(-100, 100),
               label: value.round().toString(),
               divisions: 200,
-              onChanged: lockedBy != null ? null : onChanged,
+              onChanged: locked ? null : onChanged,
             ),
           ),
           SizedBox(
             width: 40,
             child: Text('${value.round()}', textAlign: TextAlign.end),
+          ),
+          // 값이 0이 아닐 때만 리셋 버튼을 노출한다.
+          SizedBox(
+            width: 40,
+            child: (value.round() != 0 && !locked && onReset != null)
+                ? IconButton(
+                    icon: const Icon(Icons.restart_alt, size: 18),
+                    tooltip: '${control.label}만 초기화',
+                    onPressed: onReset,
+                  )
+                : null,
           ),
         ],
       ),

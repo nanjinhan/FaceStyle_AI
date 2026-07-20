@@ -47,6 +47,9 @@ def _session_to_detail(db: Session, session: models.EditSession) -> schemas.Sess
                 for f in photo.faces
             ],
             editState=state.as_dict(),
+            completedBy=sorted(c.member_id for c in photo.completions),
+            requiredBy=sorted({f.claimed_by_member_id for f in photo.faces if f.claimed_by_member_id}),
+            finalized=photo.finalized_at is not None,
         ))
     return schemas.SessionDetail(
         id=session.id,

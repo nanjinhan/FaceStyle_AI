@@ -70,6 +70,44 @@ class Member {
       );
 }
 
+/// 사진 한 장의 완료 확정 현황 (명세 3·4장 "완료 확정").
+///
+/// 분모(`requiredMembers`)는 그 사진에서 얼굴을 클레임한 사람들이다
+/// — 명세 4장 "사진 속 클레임 인원 기준으로 계산 (예: 2/3 완료)".
+/// 전원이 완료하면 서버가 자동 확정하고 편집을 잠근다.
+class CompletionState {
+  const CompletionState({
+    this.completed = const [],
+    this.requiredMembers = const [],
+    this.finalized = false,
+  });
+
+  final List<String> completed;
+  final List<String> requiredMembers;
+  final bool finalized;
+
+  int get doneCount => completed.length;
+  int get totalCount => requiredMembers.length;
+
+  /// 아무도 얼굴을 지정하지 않아 완료 체크 자체가 불가능한 상태.
+  bool get hasNobody => requiredMembers.isEmpty;
+
+  bool isDoneBy(String? memberId) => memberId != null && completed.contains(memberId);
+
+  /// 이 사람이 완료 체크를 해야 하는 대상인지.
+  bool isRequiredOf(String? memberId) => memberId != null && requiredMembers.contains(memberId);
+
+  factory CompletionState.fromJson(Map<String, dynamic> json) => CompletionState(
+        completed: ((json['completed'] ?? json['completedBy']) as List<dynamic>? ?? const [])
+            .map((v) => v as String)
+            .toList(),
+        requiredMembers: ((json['required'] ?? json['requiredBy']) as List<dynamic>? ?? const [])
+            .map((v) => v as String)
+            .toList(),
+        finalized: json['finalized'] as bool? ?? false,
+      );
+}
+
 class Photo {
   const Photo({
     required this.id,
@@ -78,6 +116,7 @@ class Photo {
     required this.height,
     required this.faces,
     required this.editState,
+    this.completion = const CompletionState(),
   });
 
   final String id;
@@ -86,6 +125,7 @@ class Photo {
   final int height;
   final List<Face> faces;
   final EditState editState;
+  final CompletionState completion;
 
   factory Photo.fromJson(Map<String, dynamic> json) => Photo(
         id: json['id'] as String,
@@ -96,15 +136,17 @@ class Photo {
             .map((f) => Face.fromJson(f as Map<String, dynamic>))
             .toList(),
         editState: EditState.fromJson(json['editState'] as Map<String, dynamic>),
+        completion: CompletionState.fromJson(json),
       );
 
-  Photo copyWith({List<Face>? faces, EditState? editState}) => Photo(
+  Photo copyWith({List<Face>? faces, EditState? editState, CompletionState? completion}) => Photo(
         id: id,
         url: url,
         width: width,
         height: height,
         faces: faces ?? this.faces,
         editState: editState ?? this.editState,
+        completion: completion ?? this.completion,
       );
 }
 

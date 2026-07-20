@@ -55,6 +55,7 @@ async def session_ws(websocket: WebSocket, session_id: str, token: str):
     await websocket.send_json({
         "type": "state_sync",
         "photos": photo_states,
+        "completions": {photo.id: _completion_payload(photo) for photo in session.photos},
         "presence": connection_manager.presence.get(session_id, {}),
         "locks": connection_manager.param_locks.get(session_id, {}),
     })
@@ -89,24 +90,29 @@ async def session_ws(websocket: WebSocket, session_id: str, token: str):
         db.close()
 
 
-def _authorize_edit(db: Session, session: models.EditSession, member: models.Member, path: str) -> Optional[str]:
+def _authorize_edit(
+    db: Session,
+    session: models.EditSession,
+    member: models.Member,
+    photo: models.Photo,
+    path: str,
+) -> Optional[str]:
     """편집 권한을 **서버에서** 강제한다 (명세 3장 "편집 권한 분리" / 아키텍처 설계 원칙 3).
 
     거부 사유 문자열을 돌려주고, 통과하면 None. 클라이언트를 신뢰하지 않는다.
       - `faces.{faceId}.*` → 그 얼굴을 클레임한 본인만
       - `global.*`        → 방 설정(기본 방장 전용)에 따름
     """
+    if photo.finalized_at is not None:
+        return "이미 확정된 사진이에요"
     if session.status == "locked" and member.role != "host":
         return "방이 보기 전용으로 잠겨 있어요"
 
     face_id = state_module.face_id_of(path)
     if face_id is not None:
         face = db.get(models.Face, face_id)
-        if face is None:
+        if face is None or face.photo_id != photo.id:
             return "얼굴을 찾을 수 없어요"
-        photo = db.get(models.Photo, face.photo_id)
-        if photo is None or photo.session_id != session.id:
-            return "이 방의 사진이 아니에요"
         if face.claimed_by_member_id is None:
             return "아직 아무도 지정하지 않은 얼굴이에요"
         if face.claimed_by_member_id != member.id:
@@ -117,6 +123,23 @@ def _authorize_edit(db: Session, session: models.EditSession, member: models.Mem
     if session.global_edit_policy != "everyone" and member.role != "host":
         return "공용 영역은 방장만 편집할 수 있어요"
     return None
+
+
+def _required_members(photo: models.Photo) -> list[str]:
+    """완료 확정의 분모 — 그 사진에서 얼굴을 클레임한 멤버들.
+
+    명세 4장 "진행 상태 아이콘 — 사진 속 클레임 인원 기준으로 계산 (예: 2/3 완료)".
+    """
+    return sorted({f.claimed_by_member_id for f in photo.faces if f.claimed_by_member_id})
+
+
+def _completion_payload(photo: models.Photo) -> dict:
+    return {
+        "photoId": photo.id,
+        "completed": sorted(c.member_id for c in photo.completions),
+        "required": _required_members(photo),
+        "finalized": photo.finalized_at is not None,
+    }
 
 
 async def _reject(session_id: str, member_id: str, photo_id: str, path: str, reason: str) -> None:
@@ -134,10 +157,11 @@ async def _handle_message(db: Session, session_id: str, member: models.Member, m
         if not isinstance(photo_id, str) or not isinstance(path, str):
             return
         session = db.get(models.EditSession, session_id)
-        if session is None:
+        photo = db.get(models.Photo, photo_id)
+        if session is None or photo is None or photo.session_id != session_id:
             return
 
-        reason = _authorize_edit(db, session, member, path)
+        reason = _authorize_edit(db, session, member, photo, path)
         if reason is not None:
             await _reject(session_id, member.id, photo_id, path, reason)
             return
@@ -165,6 +189,44 @@ async def _handle_message(db: Session, session_id: str, member: models.Member, m
         if entry is None:
             return
         await _persist_and_broadcast(db, session_id, photo_id, member, state, entry)
+
+    elif msg_type in ("complete", "uncomplete"):
+        photo_id = msg.get("photoId")
+        if not isinstance(photo_id, str):
+            return
+        photo = db.get(models.Photo, photo_id)
+        if photo is None or photo.session_id != session_id:
+            return
+        if photo.finalized_at is not None:
+            await _reject(session_id, member.id, photo_id, "", "이미 확정된 사진이에요")
+            return
+
+        # 얼굴을 지정하지 않은 사람은 완료 체크 대상이 아니다.
+        if member.id not in _required_members(photo):
+            await _reject(session_id, member.id, photo_id, "", "이 사진에서 지정한 얼굴이 없어요")
+            return
+
+        existing = (
+            db.query(models.PhotoCompletion)
+            .filter(
+                models.PhotoCompletion.photo_id == photo_id,
+                models.PhotoCompletion.member_id == member.id,
+            )
+            .first()
+        )
+        if msg_type == "complete" and existing is None:
+            db.add(models.PhotoCompletion(photo_id=photo_id, member_id=member.id))
+        elif msg_type == "uncomplete" and existing is not None:
+            db.delete(existing)
+        else:
+            return  # 이미 그 상태 — 알릴 변화가 없다
+        db.commit()
+        db.refresh(photo)
+
+        await connection_manager.broadcast(session_id, {
+            "type": "completion_update", **_completion_payload(photo),
+        })
+        await _finalize_if_everyone_done(db, session_id, photo)
 
     elif msg_type == "presence":
         presence = connection_manager.presence.setdefault(session_id, {}).setdefault(member.id, {})
@@ -201,6 +263,33 @@ async def _handle_message(db: Session, session_id: str, member: models.Member, m
         await connection_manager.broadcast(session_id, {
             "type": "reaction", "memberId": member.id, "emoji": msg.get("emoji"),
         }, exclude=member.id)
+
+
+async def _finalize_if_everyone_done(db: Session, session_id: str, photo: models.Photo) -> None:
+    """전원이 완료 체크하면 최종본을 확정하고 편집을 잠근다 (명세 3장 "완료 확정").
+
+    확정본은 그 시점의 파라미터 스냅샷이며, 각 기기가 같은 파라미터로 렌더링하므로
+    결과가 동일하다(아키텍처 "최종 렌더링 일관성"). 서버는 픽셀을 만들지 않는다.
+    """
+    required = set(_required_members(photo))
+    if not required:
+        return  # 아무도 얼굴을 지정하지 않았다면 확정할 대상이 없다
+    completed = {c.member_id for c in photo.completions}
+    if not required <= completed:
+        return
+
+    state = edit_state_store.get(db, photo.id)
+    photo.finalized_at = datetime.utcnow()
+    photo.final_version = state.version
+    db.commit()
+
+    await connection_manager.broadcast(session_id, {
+        "type": "finalized",
+        "photoId": photo.id,
+        "version": state.version,
+        "editState": state.as_dict(),
+        "finalizedAt": photo.finalized_at.isoformat(),
+    })
 
 
 async def _persist_and_broadcast(
