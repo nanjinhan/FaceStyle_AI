@@ -13,8 +13,12 @@ class Settings:
     storage_dir: Path = Path(os.getenv("STORAGE_DIR", "./storage")).resolve()
     max_upload_mb: int = 20
 
-    max_members_mvp: int = 4
-    session_expire_hours: int = 72
+    # 명세 3장 실시간 방: 인원 제한 6명(렉 방지), 24시간 후 자동 만료(서버 부담·프라이버시)
+    max_members: int = 6
+    session_expire_hours: int = 24
+
+    # 방 하나에 올릴 수 있는 사진 수 (명세 3장 "여러 장 업로드 후 컷 선택")
+    max_photos_per_session: int = 20
 
 
 settings = Settings()

@@ -1,9 +1,11 @@
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.orm import Session
 
 from .. import models, security
+from ..collab import state as state_module
 from ..collab.manager import connection_manager
 from ..collab.state import edit_state_store
 from ..database import SessionLocal
@@ -69,6 +71,9 @@ async def session_ws(websocket: WebSocket, session_id: str, token: str):
     finally:
         connection_manager.disconnect(session_id, member.id)
         member.connected = False
+        # 개인 undo 이력은 접속 단위로 유지된다 (재접속 시 새 스택).
+        for photo in session.photos:
+            edit_state_store.get(db, photo.id).forget_member(member.id)
         if member.role == "guest":
             # 게스트 이탈 시 클레임 해제(문서 7.2 예외 플로우)
             for face in (
@@ -84,33 +89,95 @@ async def session_ws(websocket: WebSocket, session_id: str, token: str):
         db.close()
 
 
+def _authorize_edit(db: Session, session: models.EditSession, member: models.Member, path: str) -> Optional[str]:
+    """편집 권한을 **서버에서** 강제한다 (명세 3장 "편집 권한 분리" / 아키텍처 설계 원칙 3).
+
+    거부 사유 문자열을 돌려주고, 통과하면 None. 클라이언트를 신뢰하지 않는다.
+      - `faces.{faceId}.*` → 그 얼굴을 클레임한 본인만
+      - `global.*`        → 방 설정(기본 방장 전용)에 따름
+    """
+    if session.status == "locked" and member.role != "host":
+        return "방이 보기 전용으로 잠겨 있어요"
+
+    face_id = state_module.face_id_of(path)
+    if face_id is not None:
+        face = db.get(models.Face, face_id)
+        if face is None:
+            return "얼굴을 찾을 수 없어요"
+        photo = db.get(models.Photo, face.photo_id)
+        if photo is None or photo.session_id != session.id:
+            return "이 방의 사진이 아니에요"
+        if face.claimed_by_member_id is None:
+            return "아직 아무도 지정하지 않은 얼굴이에요"
+        if face.claimed_by_member_id != member.id:
+            return "다른 참여자의 영역이에요"
+        return None
+
+    # global.* — 공용 영역
+    if session.global_edit_policy != "everyone" and member.role != "host":
+        return "공용 영역은 방장만 편집할 수 있어요"
+    return None
+
+
+async def _reject(session_id: str, member_id: str, photo_id: str, path: str, reason: str) -> None:
+    await connection_manager.send_to(session_id, member_id, {
+        "type": "edit_rejected", "photoId": photo_id, "path": path, "reason": reason,
+    })
+
+
 async def _handle_message(db: Session, session_id: str, member: models.Member, msg: dict) -> None:
     msg_type = msg.get("type")
 
-    if msg_type == "edit":
-        await _apply_and_broadcast(db, session_id, member, msg["photoId"], msg["path"], msg["value"])
+    if msg_type in ("edit", "reset_param"):
+        photo_id = msg.get("photoId")
+        path = msg.get("path")
+        if not isinstance(photo_id, str) or not isinstance(path, str):
+            return
+        session = db.get(models.EditSession, session_id)
+        if session is None:
+            return
+
+        reason = _authorize_edit(db, session, member, path)
+        if reason is not None:
+            await _reject(session_id, member.id, photo_id, path, reason)
+            return
+
+        state = edit_state_store.get(db, photo_id)
+        try:
+            if msg_type == "edit":
+                entry = state.apply(member.id, path, msg.get("value"))
+            else:
+                entry = state.reset(member.id, path)
+        except state_module.InvalidPath as exc:
+            await _reject(session_id, member.id, photo_id, path, str(exc))
+            return
+        if entry is None:  # 이미 기본값이라 바뀐 게 없다
+            return
+        await _persist_and_broadcast(db, session_id, photo_id, member, state, entry)
 
     elif msg_type in ("undo", "redo"):
-        photo_id = msg["photoId"]
+        photo_id = msg.get("photoId")
+        if not isinstance(photo_id, str):
+            return
         state = edit_state_store.get(db, photo_id)
+        # 본인 스택만 되감으므로 권한 재검사가 필요 없다 (애초에 통과한 편집만 쌓인다).
         entry = state.undo(member.id) if msg_type == "undo" else state.redo(member.id)
         if entry is None:
             return
-        edit_state_store.persist(db, state)
-        db.add(models.EditHistory(
-            photo_id=photo_id, seq=entry["seq"], member_id=member.id,
-            op=entry["op"], path=entry["path"], from_value=entry["from"], to_value=entry["to"],
-        ))
-        db.commit()
-        await connection_manager.broadcast(session_id, {"type": "edit_applied", "photoId": photo_id, **entry})
+        await _persist_and_broadcast(db, session_id, photo_id, member, state, entry)
 
     elif msg_type == "presence":
         presence = connection_manager.presence.setdefault(session_id, {}).setdefault(member.id, {})
+        cursor = msg.get("cursor")
+        if not (isinstance(cursor, dict) and {"x", "y"} <= cursor.keys()):
+            cursor = None
         presence["tool"] = msg.get("tool")
         presence["region"] = msg.get("region")
+        presence["cursor"] = cursor
         await connection_manager.broadcast(session_id, {
             "type": "presence_update", "memberId": member.id,
-            "tool": msg.get("tool"), "region": msg.get("region"), "connected": True,
+            "tool": msg.get("tool"), "region": msg.get("region"), "cursor": cursor,
+            "connected": True,
         }, exclude=member.id)
 
     elif msg_type == "lock_param":
@@ -136,11 +203,15 @@ async def _handle_message(db: Session, session_id: str, member: models.Member, m
         }, exclude=member.id)
 
 
-async def _apply_and_broadcast(
-    db: Session, session_id: str, member: models.Member, photo_id: str, path: str, value
+async def _persist_and_broadcast(
+    db: Session,
+    session_id: str,
+    photo_id: str,
+    member: models.Member,
+    state: state_module.PhotoEditState,
+    entry: dict,
 ) -> None:
-    state = edit_state_store.get(db, photo_id)
-    entry = state.apply(member.id, path, value)
+    """편집 1건을 DB에 남기고 방 전원에게 알린다."""
     edit_state_store.persist(db, state)
     db.add(models.EditHistory(
         photo_id=photo_id, seq=entry["seq"], member_id=member.id,

@@ -29,6 +29,16 @@ class ConnectionManager:
         for path in [p for p, holder in locks.items() if holder == member_id]:
             locks.pop(path, None)
 
+    async def send_to(self, session_id: str, member_id: str, message: dict) -> None:
+        """특정 멤버에게만 보낸다 (예: 권한 위반으로 편집이 거부됐을 때)."""
+        ws = self.connections.get(session_id, {}).get(member_id)
+        if ws is None:
+            return
+        try:
+            await ws.send_json(message)
+        except Exception:
+            self.disconnect(session_id, member_id)
+
     async def broadcast(self, session_id: str, message: dict, exclude: Optional[str] = None) -> None:
         for member_id, ws in list(self.connections.get(session_id, {}).items()):
             if member_id == exclude:

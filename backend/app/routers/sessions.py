@@ -55,6 +55,7 @@ def _session_to_detail(db: Session, session: models.EditSession) -> schemas.Sess
         inviteCode=session.invite_code,
         maxMembers=session.max_members,
         expiresAt=session.expires_at,
+        globalEditPolicy=session.global_edit_policy,
         members=[
             schemas.MemberOut(id=m.id, nickname=m.nickname, role=m.role, connected=m.connected)
             for m in session.members
@@ -64,36 +65,52 @@ def _session_to_detail(db: Session, session: models.EditSession) -> schemas.Sess
     )
 
 
-@router.post("", response_model=schemas.SessionDetail, status_code=status.HTTP_201_CREATED)
-def create_session(
-    file: UploadFile = File(...),
-    current_user: models.User = Depends(security.get_current_user),
-    db: Session = Depends(get_db),
-):
-    """사진 업로드(SES-01) + 세션 자동 생성(SES-02, MVP는 세션당 사진 1장)."""
-    now = datetime.utcnow()
-    session = models.EditSession(
-        host_user_id=current_user.id,
-        invite_code=_gen_invite_code(),
-        max_members=settings.max_members_mvp,
-        expires_at=now + timedelta(hours=settings.session_expire_hours),
-    )
-    db.add(session)
-    db.flush()
-
+def _store_photo(db: Session, session_id: str, file: UploadFile, order_index: int) -> models.Photo:
+    """사진 1장을 저장하고 얼굴 검출 결과까지 등록한다."""
     try:
-        url, _size = storage.save_photo(session.id, file)
+        url, _size = storage.save_photo(session_id, file)
     except ValueError as exc:
-        db.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-    photo = models.Photo(session_id=session.id, url=url, order_index=0)
+    photo = models.Photo(session_id=session_id, url=url, order_index=order_index)
     db.add(photo)
     db.flush()
 
     image_path = settings.storage_dir / url.removeprefix("/media/")
     for idx, (x, y, w, h) in enumerate(detect_faces(image_path)):
         db.add(models.Face(photo_id=photo.id, face_index=idx, bbox_x=x, bbox_y=y, bbox_w=w, bbox_h=h))
+    return photo
+
+
+@router.post("", response_model=schemas.SessionDetail, status_code=status.HTTP_201_CREATED)
+def create_session(
+    files: list[UploadFile] = File(...),
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """사진 업로드(SES-01) + 세션 자동 생성(SES-02).
+
+    명세 3장 "컷 선택 — 여러 장 업로드 후 보정할 컷 함께 선택"에 따라 여러 장을 받는다.
+    """
+    if not files:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "사진을 최소 1장 올려주세요")
+    if len(files) > settings.max_photos_per_session:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"사진은 최대 {settings.max_photos_per_session}장까지 올릴 수 있어요",
+        )
+
+    now = datetime.utcnow()
+    session = models.EditSession(
+        host_user_id=current_user.id,
+        invite_code=_gen_invite_code(),
+        max_members=settings.max_members,
+        expires_at=now + timedelta(hours=settings.session_expire_hours),
+    )
+    db.add(session)
+    db.flush()
+
+    photos = [_store_photo(db, session.id, f, idx) for idx, f in enumerate(files)]
 
     host_member = models.Member(
         session_id=session.id, user_id=current_user.id,
@@ -103,8 +120,45 @@ def create_session(
     db.commit()
     db.refresh(session)
 
-    edit_state_store.get(db, photo.id)
+    for photo in photos:
+        edit_state_store.get(db, photo.id)
     return _session_to_detail(db, session)
+
+
+@router.post("/{session_id}/photos", response_model=schemas.SessionDetail, status_code=status.HTTP_201_CREATED)
+async def add_photos(
+    session_id: str,
+    files: list[UploadFile] = File(...),
+    member: models.Member = Depends(security.get_current_member),
+    db: Session = Depends(get_db),
+):
+    """방에 사진을 추가로 올린다 (명세 3장 "사진 다중 업로드")."""
+    session = _get_session_or_404(db, session_id)
+    _require_membership(session_id, member)
+    if session.status != "active":
+        raise HTTPException(status.HTTP_409_CONFLICT, "지금은 사진을 추가할 수 없어요")
+
+    existing = len(session.photos)
+    if existing + len(files) > settings.max_photos_per_session:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"사진은 최대 {settings.max_photos_per_session}장까지 올릴 수 있어요",
+        )
+
+    photos = [_store_photo(db, session_id, f, existing + i) for i, f in enumerate(files)]
+    session.last_activity_at = datetime.utcnow()
+    db.commit()
+    db.refresh(session)
+
+    for photo in photos:
+        edit_state_store.get(db, photo.id)
+    detail = _session_to_detail(db, session)
+    await connection_manager.broadcast(session_id, {
+        "type": "photos_added",
+        "photoIds": [p.id for p in photos],
+        "uploadedBy": member.id,
+    })
+    return detail
 
 
 @router.get("/{session_id}", response_model=schemas.SessionDetail)
@@ -183,6 +237,29 @@ def toggle_lock(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "host only")
     session.status = "locked" if locked else "active"
     db.commit()
+    return _session_to_detail(db, session)
+
+
+@router.post("/{session_id}/global-edit-policy", response_model=schemas.SessionDetail)
+async def set_global_edit_policy(
+    session_id: str,
+    policy: str,
+    member: models.Member = Depends(security.get_current_member),
+    db: Session = Depends(get_db),
+):
+    """공용 영역(배경·전체 톤) 편집 권한 설정 — 명세 3장 "공용 영역 권한". 기본값 방장 전용."""
+    session = _get_session_or_404(db, session_id)
+    _require_membership(session_id, member)
+    if member.role != "host":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "방장만 바꿀 수 있어요")
+    if policy not in ("host_only", "everyone"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "policy는 host_only 또는 everyone")
+
+    session.global_edit_policy = policy
+    db.commit()
+    await connection_manager.broadcast(session_id, {
+        "type": "settings_updated", "globalEditPolicy": policy,
+    })
     return _session_to_detail(db, session)
 
 

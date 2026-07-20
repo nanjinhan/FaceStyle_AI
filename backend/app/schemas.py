@@ -54,6 +54,7 @@ class SessionDetail(BaseModel):
     inviteCode: str
     maxMembers: int
     expiresAt: datetime
+    globalEditPolicy: str  # host_only | everyone — 공용 영역 편집 권한
     members: list[MemberOut]
     photos: list[PhotoOut]
 

@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 togethersnap.db
 storage/
+.pytest_cache/

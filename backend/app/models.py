@@ -32,7 +32,9 @@ class EditSession(Base):
     invite_token = Column(String, unique=True, nullable=False, default=lambda: uuid.uuid4().hex)
     invite_code = Column(String, unique=True, nullable=False)
     status = Column(String, default="active")  # active | locked | expired
-    max_members = Column(Integer, default=4)
+    max_members = Column(Integer, default=6)
+    # 공용 영역(global.*) 편집 권한 — 명세 3장 "공용 영역 권한", 기본값 방장 전용
+    global_edit_policy = Column(String, default="host_only")  # host_only | everyone
     created_at = Column(DateTime, default=datetime.utcnow)
     last_activity_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
