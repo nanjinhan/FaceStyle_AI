@@ -51,6 +51,7 @@ class Member {
     required this.nickname,
     required this.role,
     required this.connected,
+    this.color,
   });
 
   final String id;
@@ -60,6 +61,9 @@ class Member {
   final String role;
   final bool connected;
 
+  /// 로그인 유저면 배정된 고유색 "#RRGGBB", 게스트면 null(앱이 memberId 해시로 폴백).
+  final String? color;
+
   bool get isHost => role == 'host';
 
   factory Member.fromJson(Map<String, dynamic> json) => Member(
@@ -67,6 +71,7 @@ class Member {
         nickname: json['nickname'] as String,
         role: json['role'] as String,
         connected: json['connected'] as bool? ?? false,
+        color: json['color'] as String?,
       );
 }
 

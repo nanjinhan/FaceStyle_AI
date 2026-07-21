@@ -19,6 +19,8 @@ class User(Base):
     provider_id = Column(String, nullable=False)
     nickname = Column(String, nullable=False)
     profile_image = Column(String, nullable=True)
+    # 가입 시 자동 배정되는 고유 색상(#RRGGBB) — 커서·프로필·클레임 테두리에 쓴다.
+    color = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("provider", "provider_id", name="uq_user_provider"),)
@@ -56,6 +58,7 @@ class Member(Base):
     left_at = Column(DateTime, nullable=True)
 
     session = relationship("EditSession", back_populates="members")
+    user = relationship("User")  # 로그인 유저면 고유색 등을 참조 (게스트는 None)
 
 
 class Photo(Base):

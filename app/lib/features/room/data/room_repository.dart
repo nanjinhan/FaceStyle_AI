@@ -1,7 +1,19 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 
 import '../../../core/api/api_client.dart';
+import '../../../core/config.dart';
 import '../domain/session_models.dart';
+
+/// 업로드할 사진 1장 (image_picker 결과에서 만든다).
+class UploadPhoto {
+  const UploadPhoto({required this.filename, required this.bytes});
+  final String filename;
+  final Uint8List bytes;
+}
 
 /// 방 참여 결과: member 토큰 + 세션 스냅샷.
 class JoinResult {
@@ -34,6 +46,27 @@ class RoomRepository {
     final json = await _api.get('/sessions/$sessionId', memberToken: memberToken)
         as Map<String, dynamic>;
     return SessionDetail.fromJson(json);
+  }
+
+  /// 사진 여러 장으로 실시간 방 생성 (SES-01/02). 로그인 유저 토큰이 필요하다.
+  /// 생성자는 호스트가 되지만 member 토큰은 별도로 발급받아야 한다(join 또는 아래 hostToken).
+  Future<SessionDetail> createSession(List<UploadPhoto> photos) async {
+    final token = _api.userToken;
+    if (token == null) {
+      throw ApiException(401, '로그인이 필요해요');
+    }
+    final req = http.MultipartRequest('POST', Uri.parse('${AppConfig.apiBaseUrl}/sessions'));
+    req.headers['Authorization'] = 'Bearer $token';
+    for (final p in photos) {
+      req.files.add(http.MultipartFile.fromBytes('files', p.bytes, filename: p.filename));
+    }
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    final body = utf8.decode(res.bodyBytes);
+    if (res.statusCode >= 400) {
+      throw ApiException(res.statusCode, body);
+    }
+    return SessionDetail.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 
   /// "이게 나예요" — 얼굴 클레임(FACE-02). 이미 남이 클레임했으면 409.

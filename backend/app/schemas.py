@@ -10,13 +10,18 @@ class UserOut(BaseModel):
     id: str
     nickname: str
     profile_image: Optional[str] = None
+    color: Optional[str] = None  # 고유 색상 #RRGGBB
 
 
 class SocialLoginRequest(BaseModel):
-    provider: str  # kakao | apple | google
+    provider: str  # kakao | apple | google | dev
     provider_id: str
     nickname: str
     profile_image: Optional[str] = None
+
+
+class UpdateProfileRequest(BaseModel):
+    nickname: Optional[str] = None
 
 
 class AuthResponse(BaseModel):
@@ -49,6 +54,7 @@ class MemberOut(BaseModel):
     nickname: str
     role: str
     connected: bool
+    color: Optional[str] = None  # 로그인 유저면 배정색, 게스트면 null(앱이 해시로 폴백)
 
 
 class SessionDetail(BaseModel):

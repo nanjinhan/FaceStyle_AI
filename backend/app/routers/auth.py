@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from .. import models, schemas, security
+from .. import colors, models, schemas, security
 from ..database import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,6 +26,7 @@ def social_login(payload: schemas.SocialLoginRequest, db: Session = Depends(get_
             provider_id=payload.provider_id,
             nickname=payload.nickname,
             profile_image=payload.profile_image,
+            color=colors.assign_color(db),  # 가입 시 고유색 자동 배정 (B1)
         )
         db.add(user)
         db.commit()
@@ -33,6 +34,24 @@ def social_login(payload: schemas.SocialLoginRequest, db: Session = Depends(get_
 
     token = security.create_user_token(user.id)
     return schemas.AuthResponse(access_token=token, user=schemas.UserOut.model_validate(user))
+
+
+@router.patch("/me", response_model=schemas.UserOut)
+def update_me(
+    payload: schemas.UpdateProfileRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """닉네임 변경 (명세 1장 — 회원정보 수정). 닉네임 중복은 허용."""
+    if payload.nickname is not None:
+        nickname = payload.nickname.strip()
+        if not nickname:
+            from fastapi import HTTPException, status
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "닉네임을 입력해주세요")
+        current_user.nickname = nickname
+    db.commit()
+    db.refresh(current_user)
+    return current_user
 
 
 @router.get("/me", response_model=schemas.UserOut)

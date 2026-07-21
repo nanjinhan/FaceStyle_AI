@@ -60,7 +60,10 @@ def _session_to_detail(db: Session, session: models.EditSession) -> schemas.Sess
         expiresAt=session.expires_at,
         globalEditPolicy=session.global_edit_policy,
         members=[
-            schemas.MemberOut(id=m.id, nickname=m.nickname, role=m.role, connected=m.connected)
+            schemas.MemberOut(
+                id=m.id, nickname=m.nickname, role=m.role, connected=m.connected,
+                color=m.user.color if m.user else None,
+            )
             for m in session.members
             if m.left_at is None
         ],

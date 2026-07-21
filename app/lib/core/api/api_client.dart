@@ -39,6 +39,15 @@ class ApiClient {
     return _decode(res);
   }
 
+  Future<dynamic> patch(String path, {Object? body, String? memberToken}) async {
+    final res = await http.patch(
+      _uri(path),
+      headers: _headers(memberToken: memberToken),
+      body: body == null ? null : jsonEncode(body),
+    );
+    return _decode(res);
+  }
+
   dynamic _decode(http.Response res) {
     if (res.statusCode >= 400) {
       throw ApiException(res.statusCode, utf8.decode(res.bodyBytes));

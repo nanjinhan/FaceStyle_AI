@@ -85,9 +85,7 @@ class FaceOverlay extends StatelessWidget {
     final isTaken = owner != null && !isMine;
     final isSelected = face.pathKey == selectedFaceKey;
 
-    final color = owner == null
-        ? Colors.white
-        : MemberColors.fromHex(null, fallbackSeed: owner);
+    final color = owner == null ? Colors.white : _colorOf(owner);
 
     return Positioned(
       left: topLeft.dx,
@@ -184,7 +182,7 @@ class FaceOverlay extends StatelessWidget {
       if (cursor == null) continue;
       // 정규화(0~1) → 원본 픽셀 → 화면 좌표
       final pos = toScreen(cursor.dx * imageSize.width, cursor.dy * imageSize.height);
-      final color = MemberColors.fromHex(null, fallbackSeed: entry.key);
+      final color = _colorOf(entry.key);
       final nick = _nicknameOf(entry.key) ?? '참여자';
       widgets.add(Positioned(
         left: pos.dx,
@@ -217,5 +215,13 @@ class FaceOverlay extends StatelessWidget {
       if (m.id == memberId) return m.nickname;
     }
     return null;
+  }
+
+  /// 멤버의 고유색 — 로그인 유저면 서버 배정색, 게스트면 memberId 해시 폴백.
+  Color _colorOf(String memberId) {
+    for (final m in state.session?.members ?? const <Member>[]) {
+      if (m.id == memberId) return MemberColors.fromHex(m.color, fallbackSeed: memberId);
+    }
+    return MemberColors.fromHex(null, fallbackSeed: memberId);
   }
 }
