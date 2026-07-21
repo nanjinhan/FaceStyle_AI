@@ -40,7 +40,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await ref.read(authControllerProvider.notifier).signInWithNickname(nickname);
       if (mounted) context.go('/home');
     } catch (e) {
-      if (mounted) setState(() => _error = '로그인에 실패했어요. 서버 연결을 확인해주세요.');
+      // 원인 파악을 위해 실제 예외를 그대로 보여준다 (안정화되면 친절한 문구로 교체)
+      if (mounted) setState(() => _error = '로그인 실패: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

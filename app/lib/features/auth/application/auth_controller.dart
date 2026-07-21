@@ -67,7 +67,8 @@ class AuthController extends Notifier<AuthState> {
     final prefs = await SharedPreferences.getInstance();
     var providerId = prefs.getString(_kProviderIdKey);
     if (providerId == null) {
-      providerId = 'dev-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 32)}';
+      // 1 << 32 는 웹(JS)에서 0이 되므로 사용 금지 — 2^31-1 로 충분하다.
+      providerId = 'dev-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(0x7fffffff)}';
       await prefs.setString(_kProviderIdKey, providerId);
     }
 

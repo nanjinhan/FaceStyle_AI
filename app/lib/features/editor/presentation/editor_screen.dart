@@ -31,33 +31,62 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   /// 지금 얼굴별 슬라이더가 편집 중인 얼굴 키 (예: "face_0"). null이면 전역 보정 모드.
   String? _selectedFaceKey;
 
+  /// 선택된 카테고리 index / 카테고리별로 마지막에 고른 항목 key.
+  int _categoryIndex = 0;
+  final Map<int, String> _itemPerCategory = {};
+
   String get sessionId => widget.sessionId;
   String get photoId => widget.photoId;
 
-  /// 전역 보정 슬라이더 구성 (백엔드 DEFAULT_GLOBAL_PARAMS 의 스칼라 항목).
-  static const _globalControls = <_Control>[
-    _Control('brightness', '밝기', Icons.brightness_6_outlined),
-    _Control('contrast', '대비', Icons.contrast),
-    _Control('saturation', '채도', Icons.water_drop_outlined),
-    _Control('colorTemp', '색온도', Icons.thermostat_outlined),
-    _Control('highlights', '하이라이트', Icons.wb_sunny_outlined),
-    _Control('shadows', '그림자', Icons.nightlight_outlined),
+  /// 보정 카테고리 구성 — 상용 보정 앱과 같은 탭 구조.
+  /// isFace=false 는 global.*, true 는 faces.{face}.* 파라미터를 조절한다.
+  /// (백엔드 DEFAULT_GLOBAL_PARAMS / DEFAULT_FACE_PARAMS 의 키와 1:1)
+  static const _categories = <_EditCategory>[
+    _EditCategory('보정', false, [
+      _Control('brightness', '밝기', Icons.brightness_6_outlined),
+      _Control('contrast', '대비', Icons.contrast),
+      _Control('saturation', '채도', Icons.water_drop_outlined),
+      _Control('colorTemp', '색온도', Icons.thermostat_outlined),
+      _Control('highlights', '하이라이트', Icons.wb_sunny_outlined),
+      _Control('shadows', '그림자', Icons.nightlight_outlined),
+    ]),
+    _EditCategory('피부', true, [
+      _Control('skinSmooth', '피부 매끈', Icons.blur_on),
+      _Control('blemishRemoval', '잡티 제거', Icons.healing_outlined),
+      _Control('skinTone', '피부 톤', Icons.face_retouching_natural),
+    ]),
+    _EditCategory('얼굴형', true, [
+      _Control('faceSlim', '얼굴 축소', Icons.compress),
+      _Control('jawSlim', '턱선', Icons.face_outlined),
+      _Control('cheekbone', '광대', Icons.face_2_outlined),
+    ]),
+    _EditCategory('눈', true, [
+      _Control('eyeScale', '눈 크기', Icons.remove_red_eye_outlined),
+    ]),
+    _EditCategory('코', true, [
+      _Control('noseHeight', '코 높이', Icons.arrow_upward),
+      _Control('noseWidth', '코 너비', Icons.unfold_more),
+    ]),
+    _EditCategory('입', true, [
+      _Control('lipScale', '입술 크기', Icons.face_3_outlined),
+      _Control('lipColor', '입술 색', Icons.color_lens_outlined),
+    ]),
   ];
 
-  /// 얼굴별 보정 슬라이더 (백엔드 DEFAULT_FACE_PARAMS).
-  static const _faceControls = <_Control>[
-    _Control('skinSmooth', '피부 매끈', Icons.blur_on),
-    _Control('blemishRemoval', '잡티 제거', Icons.healing_outlined),
-    _Control('skinTone', '피부 톤', Icons.face_retouching_natural),
-    _Control('jawSlim', '턱선', Icons.face_outlined),
-    _Control('faceSlim', '얼굴 축소', Icons.compress),
-    _Control('cheekbone', '광대', Icons.face_2_outlined),
-    _Control('eyeScale', '눈 크기', Icons.remove_red_eye_outlined),
-    _Control('noseHeight', '코 높이', Icons.arrow_upward),
-    _Control('noseWidth', '코 너비', Icons.unfold_more),
-    _Control('lipScale', '입술 크기', Icons.face_3_outlined),
-    _Control('lipColor', '입술 색', Icons.color_lens_outlined),
-  ];
+  _EditCategory get _category => _categories[_categoryIndex];
+
+  /// 현재 카테고리에서 선택된 항목 (기본: 첫 번째).
+  _Control get _item {
+    final key = _itemPerCategory[_categoryIndex];
+    return _category.items.firstWhere((c) => c.key == key, orElse: () => _category.items.first);
+  }
+
+  /// 현재 조절 대상 파라미터 경로. 얼굴 카테고리인데 얼굴 미선택이면 null.
+  String? get _paramPath {
+    if (!_category.isFace) return 'global.${_item.key}';
+    if (_selectedFaceKey == null) return null;
+    return 'faces.$_selectedFaceKey.${_item.key}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -320,13 +349,23 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
             state: state,
             controller: controller,
             selectedFaceKey: _selectedFaceKey,
-            onSelectFace: (key) => setState(() => _selectedFaceKey = key),
+            onSelectFace: (key) => setState(() {
+              _selectedFaceKey = key;
+              // 얼굴을 고르면 얼굴 카테고리로, 해제하면 전체 보정으로 자동 전환.
+              if (key != null && !_category.isFace) {
+                _categoryIndex = 1; // 피부
+              } else if (key == null && _category.isFace) {
+                _categoryIndex = 0; // 보정(전역)
+              }
+            }),
           ),
         ],
       ),
     );
   }
 
+  /// 하단 편집 패널 — 상용 보정 앱 구조:
+  /// [슬라이더 1개] → [카테고리 탭] → [항목 아이콘 칩들]
   Widget _sliderPanel(
     BuildContext context,
     RoomState state,
@@ -335,90 +374,195 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     Photo photo,
   ) {
     final finalized = state.completionOf(photoId).finalized;
-    final editingFace = _selectedFaceKey != null;
+    final path = _paramPath;
 
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: SizedBox(
-        height: 240,
+      child: SafeArea(
+        top: false,
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _panelHeader(context, state, editingFace),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                children: editingFace
-                    ? [
-                        for (final c in _faceControls)
-                          _slider(context, state, controller, editState, finalized,
-                              'faces.$_selectedFaceKey.${c.key}', c),
-                      ]
-                    : [
-                        for (final c in _globalControls)
-                          _slider(context, state, controller, editState, finalized,
-                              'global.${c.key}', c),
-                      ],
-              ),
-            ),
+            _sliderRow(context, state, controller, editState, finalized, path),
+            const Divider(height: 1),
+            _categoryTabs(context),
+            _itemChips(context, editState),
+            const SizedBox(height: 6),
           ],
         ),
       ),
     );
   }
 
-  /// 슬라이더 패널 상단 — 전역/얼굴 모드 전환 표시.
-  Widget _panelHeader(BuildContext context, RoomState state, bool editingFace) {
-    if (!editingFace) {
-      return const Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-        child: Row(
-          children: [
-            Icon(Icons.public, size: 16),
-            SizedBox(width: 6),
-            Text('전체 보정', style: TextStyle(fontWeight: FontWeight.bold)),
-            SizedBox(width: 8),
-            Expanded(child: Text('얼굴을 탭해 내 얼굴을 보정하세요', style: TextStyle(fontSize: 12))),
-          ],
-        ),
+  /// 선택된 항목 하나만 조절하는 슬라이더 줄.
+  Widget _sliderRow(
+    BuildContext context,
+    RoomState state,
+    RoomController controller,
+    EditState editState,
+    bool finalized,
+    String? path,
+  ) {
+    // 얼굴 카테고리인데 아직 얼굴을 안 골랐으면 안내만.
+    if (path == null) {
+      return const SizedBox(
+        height: 56,
+        child: Center(child: Text('사진에서 내 얼굴을 탭한 뒤 보정할 수 있어요')),
       );
     }
-    final color = MemberColors.fromHex(null, fallbackSeed: state.myMemberId ?? '');
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+
+    final value = (editState.valueAt(path) as num?)?.toDouble() ?? 0;
+    final lockedBy = finalized ? Theme.of(context).disabledColor : _lockOwner(state, path);
+    final locked = lockedBy != null;
+
+    return SizedBox(
+      height: 56,
       child: Row(
         children: [
-          Icon(Icons.face, size: 16, color: color),
-          const SizedBox(width: 6),
-          const Text('내 얼굴 보정', style: TextStyle(fontWeight: FontWeight.bold)),
-          const Spacer(),
-          TextButton(
-            onPressed: () => setState(() => _selectedFaceKey = null),
-            child: const Text('전체 보정으로'),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 76,
+            child: Text(_item.label, style: const TextStyle(fontSize: 12), maxLines: 2),
+          ),
+          Expanded(
+            child: Slider(
+              min: -100,
+              max: 100,
+              value: value.clamp(-100, 100),
+              label: value.round().toString(),
+              divisions: 200,
+              onChanged: locked
+                  ? null
+                  : (v) {
+                      controller.reportPresence(
+                        tool: _item.label,
+                        region: _category.isFace ? _selectedFaceKey : 'global',
+                      );
+                      controller.edit(photoId, path, v.round());
+                    },
+            ),
+          ),
+          SizedBox(width: 36, child: Text('${value.round()}', textAlign: TextAlign.end)),
+          // 이 항목만 원본으로 (기능별 리셋)
+          SizedBox(
+            width: 40,
+            child: (value.round() != 0 && !locked)
+                ? IconButton(
+                    icon: const Icon(Icons.restart_alt, size: 18),
+                    tooltip: '${_item.label}만 초기화',
+                    onPressed: () => controller.resetParam(photoId, path),
+                  )
+                : null,
           ),
         ],
       ),
     );
   }
 
-  Widget _slider(
-    BuildContext context,
-    RoomState state,
-    RoomController controller,
-    EditState editState,
-    bool finalized,
-    String path,
-    _Control c,
-  ) {
-    final region = path.startsWith('faces.') ? _selectedFaceKey : 'global';
-    return _GlobalSlider(
-      control: c,
-      value: (editState.valueAt(path) as num?)?.toDouble() ?? 0,
-      lockedBy: finalized ? Theme.of(context).disabledColor : _lockOwner(state, path),
-      onChanged: (v) {
-        controller.reportPresence(tool: c.label, region: region);
-        controller.edit(photoId, path, v.round());
-      },
-      onReset: finalized ? null : () => controller.resetParam(photoId, path),
+  /// 카테고리 탭 (보정 | 피부 | 얼굴형 | 눈 | 코 | 입).
+  Widget _categoryTabs(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 40,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        itemCount: _categories.length,
+        itemBuilder: (context, i) {
+          final selected = i == _categoryIndex;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: InkWell(
+              onTap: () => setState(() => _categoryIndex = i),
+              child: Container(
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      width: 2,
+                      color: selected ? scheme.primary : Colors.transparent,
+                    ),
+                  ),
+                ),
+                child: Text(
+                  _categories[i].label,
+                  style: TextStyle(
+                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    color: selected ? scheme.primary : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 현재 카테고리의 항목 아이콘 칩들. 값이 0이 아닌 항목엔 점 표시.
+  Widget _itemChips(BuildContext context, EditState editState) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 72,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: _category.items.length,
+        itemBuilder: (context, i) {
+          final item = _category.items[i];
+          final selected = item.key == _item.key;
+          final itemPath = _category.isFace
+              ? (_selectedFaceKey == null ? null : 'faces.$_selectedFaceKey.${item.key}')
+              : 'global.${item.key}';
+          final touched = itemPath != null &&
+              ((editState.valueAt(itemPath) as num?)?.toDouble() ?? 0).round() != 0;
+
+          return InkWell(
+            onTap: () => setState(() => _itemPerCategory[_categoryIndex] = item.key),
+            child: SizedBox(
+              width: 72,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Icon(
+                        item.icon,
+                        size: 26,
+                        color: selected ? scheme.primary : scheme.onSurfaceVariant,
+                      ),
+                      if (touched)
+                        Positioned(
+                          right: -4,
+                          top: -2,
+                          child: Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: scheme.primary,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: selected ? scheme.primary : scheme.onSurfaceVariant,
+                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -478,60 +622,12 @@ class _Control {
   final IconData icon;
 }
 
-class _GlobalSlider extends StatelessWidget {
-  const _GlobalSlider({
-    required this.control,
-    required this.value,
-    required this.onChanged,
-    this.lockedBy,
-    this.onReset,
-  });
-
-  final _Control control;
-  final double value;
-  final ValueChanged<double> onChanged;
-  final Color? lockedBy;
-  final VoidCallback? onReset;
-
-  @override
-  Widget build(BuildContext context) {
-    final locked = lockedBy != null;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          Icon(control.icon, size: 20, color: lockedBy),
-          const SizedBox(width: 8),
-          SizedBox(width: 64, child: Text(control.label)),
-          Expanded(
-            child: Slider(
-              min: -100,
-              max: 100,
-              value: value.clamp(-100, 100),
-              label: value.round().toString(),
-              divisions: 200,
-              onChanged: locked ? null : onChanged,
-            ),
-          ),
-          SizedBox(
-            width: 40,
-            child: Text('${value.round()}', textAlign: TextAlign.end),
-          ),
-          // 값이 0이 아닐 때만 리셋 버튼을 노출한다.
-          SizedBox(
-            width: 40,
-            child: (value.round() != 0 && !locked && onReset != null)
-                ? IconButton(
-                    icon: const Icon(Icons.restart_alt, size: 18),
-                    tooltip: '${control.label}만 초기화',
-                    onPressed: onReset,
-                  )
-                : null,
-          ),
-        ],
-      ),
-    );
-  }
+/// 보정 카테고리 (탭 하나). isFace 면 얼굴을 선택해야 조절할 수 있다.
+class _EditCategory {
+  const _EditCategory(this.label, this.isFace, this.items);
+  final String label;
+  final bool isFace;
+  final List<_Control> items;
 }
 
 class _Notice extends StatelessWidget {
