@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/api_client.dart';
 import '../../../core/api/ws_client.dart';
 import '../data/room_repository.dart';
 import '../domain/session_models.dart';
@@ -13,17 +15,29 @@ enum RoomConnection { idle, connecting, connected, needsJoin, error }
 ///  - tool:   "밝기", "잡티 제거" 등 사용 중인 도구
 ///  - region: "global" 또는 "face_0" 등 편집 중 영역
 class PresenceInfo {
-  const PresenceInfo({this.tool, this.region, this.connected = true});
+  const PresenceInfo({this.tool, this.region, this.cursor, this.connected = true});
 
   final String? tool;
   final String? region;
+
+  /// 이미지 기준 0~1 정규화 커서 좌표. 없으면 커서를 그리지 않는다.
+  final Offset? cursor;
   final bool connected;
 
-  PresenceInfo copyWith({String? tool, String? region, bool? connected}) => PresenceInfo(
+  PresenceInfo copyWith({String? tool, String? region, Offset? cursor, bool? connected}) =>
+      PresenceInfo(
         tool: tool ?? this.tool,
         region: region ?? this.region,
+        cursor: cursor ?? this.cursor,
         connected: connected ?? this.connected,
       );
+
+  static Offset? parseCursor(dynamic raw) {
+    if (raw is Map && raw['x'] is num && raw['y'] is num) {
+      return Offset((raw['x'] as num).toDouble(), (raw['y'] as num).toDouble());
+    }
+    return null;
+  }
 }
 
 /// 방 화면 전체가 구독하는 불변 상태 스냅샷.
@@ -278,6 +292,7 @@ class RoomController extends Notifier<RoomState> {
       presence[memberId] = PresenceInfo(
         tool: info['tool'] as String?,
         region: info['region'] as String?,
+        cursor: PresenceInfo.parseCursor(info['cursor']),
       );
     });
     final locks = <String, String>{};
@@ -318,6 +333,7 @@ class RoomController extends Notifier<RoomState> {
       next[memberId] = PresenceInfo(
         tool: msg['tool'] as String?,
         region: msg['region'] as String?,
+        cursor: PresenceInfo.parseCursor(msg['cursor']),
         connected: connected,
       );
     }
@@ -366,6 +382,9 @@ class RoomController extends Notifier<RoomState> {
     _edit(photoId, 'faces.$faceKey.$key', value);
   }
 
+  /// 임의 경로 편집 (전역/얼굴 공용). path 예: "global.brightness", "faces.face_0.jawSlim".
+  void edit(String photoId, String path, dynamic value) => _edit(photoId, path, value);
+
   void _edit(String photoId, String path, dynamic value) {
     final es = state.editStates[photoId];
     if (es != null) {
@@ -379,13 +398,43 @@ class RoomController extends Notifier<RoomState> {
 
   void redo(String photoId) => _socket?.redo(photoId);
 
-  /// 편집 중 도구/영역 브로드캐스트 (실시간 커서 라벨).
-  void reportPresence({String? tool, String? region}) =>
-      _socket?.presence(tool: tool, region: region);
+  /// 편집 중 도구/영역/커서 위치 브로드캐스트 (실시간 커서 라벨 + 커서 점).
+  /// cursor는 이미지 기준 0~1 정규화 좌표.
+  void reportPresence({String? tool, String? region, Map<String, double>? cursor}) =>
+      _socket?.presence(tool: tool, region: region, cursor: cursor);
 
   void lockParam(String path) => _socket?.lockParam(path);
   void unlockParam(String path) => _socket?.unlockParam(path);
   void reaction(String emoji) => _socket?.reaction(emoji);
+
+  /// "이게 나예요" — 얼굴 클레임. 실패(이미 남이 점유 등)하면 rejection 메시지로 안내.
+  /// 성공 시 서버가 face_claimed 를 브로드캐스트해 모두의 화면에 반영된다.
+  Future<void> claimFace(String photoId, String faceId) async {
+    final token = ref.read(memberTokenStoreProvider.notifier).tokenFor(_sessionId);
+    if (token == null) return;
+    try {
+      await ref
+          .read(roomRepositoryProvider)
+          .claimFace(_sessionId, photoId, faceId, memberToken: token);
+    } on ApiException catch (e) {
+      state = state.copyWith(rejection: _claimError(e));
+    }
+  }
+
+  Future<void> unclaimFace(String photoId, String faceId) async {
+    final token = ref.read(memberTokenStoreProvider.notifier).tokenFor(_sessionId);
+    if (token == null) return;
+    try {
+      await ref
+          .read(roomRepositoryProvider)
+          .unclaimFace(_sessionId, photoId, faceId, memberToken: token);
+    } on ApiException catch (e) {
+      state = state.copyWith(rejection: _claimError(e));
+    }
+  }
+
+  static String _claimError(ApiException e) =>
+      e.statusCode == 409 ? '이미 다른 참여자가 선택한 얼굴이에요' : '얼굴 선택에 실패했어요';
 
   /// 항목 하나만 원본으로 되돌린다 (기능별 리셋).
   void resetParam(String photoId, String path) => _socket?.resetParam(photoId, path);

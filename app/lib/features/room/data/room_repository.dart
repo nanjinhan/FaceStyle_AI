@@ -35,6 +35,30 @@ class RoomRepository {
         as Map<String, dynamic>;
     return SessionDetail.fromJson(json);
   }
+
+  /// "이게 나예요" — 얼굴 클레임(FACE-02). 이미 남이 클레임했으면 409.
+  /// 결과 브로드캐스트(face_claimed)는 WS로 오므로 여기서는 요청만 보낸다.
+  Future<void> claimFace(
+    String sessionId,
+    String photoId,
+    String faceId, {
+    required String memberToken,
+  }) =>
+      _api.post(
+        '/sessions/$sessionId/photos/$photoId/faces/$faceId/claim',
+        memberToken: memberToken,
+      );
+
+  Future<void> unclaimFace(
+    String sessionId,
+    String photoId,
+    String faceId, {
+    required String memberToken,
+  }) =>
+      _api.post(
+        '/sessions/$sessionId/photos/$photoId/faces/$faceId/unclaim',
+        memberToken: memberToken,
+      );
 }
 
 final roomRepositoryProvider = Provider<RoomRepository>(

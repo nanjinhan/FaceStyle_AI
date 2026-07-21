@@ -6,21 +6,33 @@ import '../../../core/theme/member_colors.dart';
 import '../../room/application/room_controller.dart';
 import '../../room/domain/session_models.dart';
 import '../rendering/photo_filter.dart';
+import 'face_overlay.dart';
 
 /// 명세 3·4 공용 보정 에디터. 실시간 방과 앨범 비동기 보정이 같은 화면을 쓴다.
 ///
 /// 이번 슬라이스(M1)에서 구현:
 ///  - RoomSocket state_sync → 전역 파라미터 슬라이더에 반영, 값 변경 시 edit 전송
-///  - 다른 참여자 프레즌스: "OO — △△ 편집 중" 라벨 (색상 점)
-///  - undo/redo 전송
+///  - 다른 참여자 프레즌스: "OO — △△ 편집 중" 라벨 + 실시간 커서
+///  - undo/redo, 기능별 리셋, 완료 확정
 ///  - 전역 파라미터 → 이미지 실시간 렌더링 (A7, `rendering/photo_filter.dart`)
-/// TODO(M1+): 얼굴 클레임 UI + 본인/타인 영역 잠금, 완료 체크(전원 완료 확정, B7)
-/// TODO(M4): MLKit 얼굴검출 + 얼굴별 워핑·스무딩 렌더링 (A7 확장)
-class EditorScreen extends ConsumerWidget {
+///  - 얼굴 클레임("이게 나예요") + 본인/타인 영역 잠금 표시 + 얼굴별 파라미터
+/// TODO(M4): 얼굴별 워핑·스무딩을 실제 픽셀에 렌더링 (지금은 파라미터 값만 동기화)
+class EditorScreen extends ConsumerStatefulWidget {
   const EditorScreen({super.key, required this.sessionId, required this.photoId});
 
   final String sessionId;
   final String photoId;
+
+  @override
+  ConsumerState<EditorScreen> createState() => _EditorScreenState();
+}
+
+class _EditorScreenState extends ConsumerState<EditorScreen> {
+  /// 지금 얼굴별 슬라이더가 편집 중인 얼굴 키 (예: "face_0"). null이면 전역 보정 모드.
+  String? _selectedFaceKey;
+
+  String get sessionId => widget.sessionId;
+  String get photoId => widget.photoId;
 
   /// 전역 보정 슬라이더 구성 (백엔드 DEFAULT_GLOBAL_PARAMS 의 스칼라 항목).
   static const _globalControls = <_Control>[
@@ -32,8 +44,23 @@ class EditorScreen extends ConsumerWidget {
     _Control('shadows', '그림자', Icons.nightlight_outlined),
   ];
 
+  /// 얼굴별 보정 슬라이더 (백엔드 DEFAULT_FACE_PARAMS).
+  static const _faceControls = <_Control>[
+    _Control('skinSmooth', '피부 매끈', Icons.blur_on),
+    _Control('blemishRemoval', '잡티 제거', Icons.healing_outlined),
+    _Control('skinTone', '피부 톤', Icons.face_retouching_natural),
+    _Control('jawSlim', '턱선', Icons.face_outlined),
+    _Control('faceSlim', '얼굴 축소', Icons.compress),
+    _Control('cheekbone', '광대', Icons.face_2_outlined),
+    _Control('eyeScale', '눈 크기', Icons.remove_red_eye_outlined),
+    _Control('noseHeight', '코 높이', Icons.arrow_upward),
+    _Control('noseWidth', '코 너비', Icons.unfold_more),
+    _Control('lipScale', '입술 크기', Icons.face_3_outlined),
+    _Control('lipColor', '입술 색', Icons.color_lens_outlined),
+  ];
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final state = ref.watch(roomControllerProvider(sessionId));
     final controller = ref.read(roomControllerProvider(sessionId).notifier);
 
@@ -130,14 +157,31 @@ class EditorScreen extends ConsumerWidget {
       return const _Notice(icon: Icons.image_not_supported_outlined, message: '사진을 찾을 수 없어요.');
     }
 
+    // 클레임이 풀린(또는 남에게 넘어간) 얼굴을 편집 중이었다면 선택 해제.
+    if (_selectedFaceKey != null) {
+      final face = _faceByKey(photo, _selectedFaceKey!);
+      if (face == null || face.claimedByMemberId != state.myMemberId) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _selectedFaceKey = null);
+        });
+      }
+    }
+
     return Column(
       children: [
         _presenceBar(context, state),
         _completionBar(context, state),
-        Expanded(child: _canvas(context, photo, editState)),
-        _sliderPanel(context, state, controller, editState),
+        Expanded(child: _canvas(context, state, controller, photo, editState)),
+        _sliderPanel(context, state, controller, editState, photo),
       ],
     );
+  }
+
+  Face? _faceByKey(Photo photo, String key) {
+    for (final f in photo.faces) {
+      if (f.pathKey == key) return f;
+    }
+    return null;
   }
 
   /// 완료 현황 — "2/3 완료" + 누가 아직인지. 확정되면 잠금 안내로 바뀐다.
@@ -240,26 +284,45 @@ class EditorScreen extends ConsumerWidget {
     return null;
   }
 
-  /// 원본 이미지에 전역 보정 파라미터를 실시간 적용해 보여준다 (A7).
+  /// 원본 이미지에 전역 보정 파라미터를 실시간 적용해 보여준다 (A7) + 얼굴 클레임 오버레이.
   ///
   /// 길게 누르면 보정 전 원본과 비교할 수 있다.
-  Widget _canvas(BuildContext context, Photo photo, EditState editState) {
+  Widget _canvas(
+    BuildContext context,
+    RoomState state,
+    RoomController controller,
+    Photo photo,
+    EditState editState,
+  ) {
     final url = '${AppConfig.apiBaseUrl}${photo.url}';
     return Container(
       color: Colors.black,
       alignment: Alignment.center,
-      child: _CompareOnHold(
-        editState: editState,
-        child: Image.network(
-          url,
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stack) => const _Notice(
-            icon: Icons.broken_image_outlined,
-            message: '사진을 불러오지 못했어요.',
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _CompareOnHold(
+            editState: editState,
+            child: Image.network(
+              url,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stack) => const _Notice(
+                icon: Icons.broken_image_outlined,
+                message: '사진을 불러오지 못했어요.',
+              ),
+              loadingBuilder: (context, child, progress) =>
+                  progress == null ? child : const CircularProgressIndicator(),
+            ),
           ),
-          loadingBuilder: (context, child, progress) =>
-              progress == null ? child : const CircularProgressIndicator(),
-        ),
+          // 얼굴 상자 + 클레임 + 실시간 커서
+          FaceOverlay(
+            photo: photo,
+            state: state,
+            controller: controller,
+            selectedFaceKey: _selectedFaceKey,
+            onSelectFace: (key) => setState(() => _selectedFaceKey = key),
+          ),
+        ],
       ),
     );
   }
@@ -269,32 +332,93 @@ class EditorScreen extends ConsumerWidget {
     RoomState state,
     RoomController controller,
     EditState editState,
+    Photo photo,
   ) {
-    // 확정된 사진은 서버가 편집을 거부하므로 UI에서도 미리 잠근다.
     final finalized = state.completionOf(photoId).finalized;
+    final editingFace = _selectedFaceKey != null;
 
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: SizedBox(
-        height: 220,
-        child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+        height: 240,
+        child: Column(
           children: [
-            for (final c in _globalControls)
-              _GlobalSlider(
-                control: c,
-                value: (editState.valueAt('global.${c.key}') as num?)?.toDouble() ?? 0,
-                lockedBy: finalized ? Theme.of(context).disabledColor : _lockOwner(state, 'global.${c.key}'),
-                onChanged: (v) {
-                  controller.reportPresence(tool: c.label, region: 'global');
-                  controller.editGlobal(photoId, c.key, v.round());
-                },
-                // 길게 눌러 이 항목만 원본으로 되돌린다 (기능별 리셋).
-                onReset: finalized ? null : () => controller.resetParam(photoId, 'global.${c.key}'),
+            _panelHeader(context, state, editingFace),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                children: editingFace
+                    ? [
+                        for (final c in _faceControls)
+                          _slider(context, state, controller, editState, finalized,
+                              'faces.$_selectedFaceKey.${c.key}', c),
+                      ]
+                    : [
+                        for (final c in _globalControls)
+                          _slider(context, state, controller, editState, finalized,
+                              'global.${c.key}', c),
+                      ],
               ),
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  /// 슬라이더 패널 상단 — 전역/얼굴 모드 전환 표시.
+  Widget _panelHeader(BuildContext context, RoomState state, bool editingFace) {
+    if (!editingFace) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+        child: Row(
+          children: [
+            Icon(Icons.public, size: 16),
+            SizedBox(width: 6),
+            Text('전체 보정', style: TextStyle(fontWeight: FontWeight.bold)),
+            SizedBox(width: 8),
+            Expanded(child: Text('얼굴을 탭해 내 얼굴을 보정하세요', style: TextStyle(fontSize: 12))),
+          ],
+        ),
+      );
+    }
+    final color = MemberColors.fromHex(null, fallbackSeed: state.myMemberId ?? '');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+      child: Row(
+        children: [
+          Icon(Icons.face, size: 16, color: color),
+          const SizedBox(width: 6),
+          const Text('내 얼굴 보정', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Spacer(),
+          TextButton(
+            onPressed: () => setState(() => _selectedFaceKey = null),
+            child: const Text('전체 보정으로'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _slider(
+    BuildContext context,
+    RoomState state,
+    RoomController controller,
+    EditState editState,
+    bool finalized,
+    String path,
+    _Control c,
+  ) {
+    final region = path.startsWith('faces.') ? _selectedFaceKey : 'global';
+    return _GlobalSlider(
+      control: c,
+      value: (editState.valueAt(path) as num?)?.toDouble() ?? 0,
+      lockedBy: finalized ? Theme.of(context).disabledColor : _lockOwner(state, path),
+      onChanged: (v) {
+        controller.reportPresence(tool: c.label, region: region);
+        controller.edit(photoId, path, v.round());
+      },
+      onReset: finalized ? null : () => controller.resetParam(photoId, path),
     );
   }
 

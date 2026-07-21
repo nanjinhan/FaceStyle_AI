@@ -41,5 +41,5 @@ cd app && flutter pub get && flutter run
 
 ```bash
 cd backend && .venv/Scripts/python.exe -m pytest tests/ -q   # 57개
-cd app && flutter test                                        # 23개
+cd app && flutter test                                        # 27개
 ```

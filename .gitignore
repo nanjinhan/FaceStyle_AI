@@ -8,3 +8,4 @@ backend/togethersnap.db
 backend/storage/
 __pycache__/
 *.pyc
+.e2e.json
