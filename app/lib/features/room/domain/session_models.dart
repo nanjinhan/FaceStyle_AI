@@ -220,8 +220,10 @@ class Face {
 
   bool get isClaimed => claimedByMemberId != null;
 
-  /// 파라미터 경로용 식별자. 예: "faces.face_0.skinSmooth"
-  String get pathKey => 'face_$faceIndex';
+  /// 파라미터 경로용 식별자 = 서버 Face id.
+  /// 예: "faces.{id}.skinSmooth". 서버 권한 검사가 이 id로 Face를 조회하므로
+  /// 반드시 DB id를 써야 한다(순번 face_0 을 쓰면 "얼굴을 찾을 수 없어요"가 뜬다).
+  String get pathKey => id;
 
   factory Face.fromJson(Map<String, dynamic> json) => Face(
         id: json['id'] as String,
