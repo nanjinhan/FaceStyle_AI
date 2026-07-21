@@ -1,6 +1,14 @@
 from pathlib import Path
+from typing import Optional, TypedDict
 
 _YUNET_MODEL = Path(__file__).parent / "models" / "face_detection_yunet_2023mar.onnx"
+
+
+class DetectedFace(TypedDict):
+    bbox: tuple[int, int, int, int]
+    # 5점 랜드마크(이미지 픽셀 좌표). YuNet일 때만 채워지고 Haar면 None.
+    #   {"rEye":[x,y], "lEye":[x,y], "nose":[x,y], "mouthR":[x,y], "mouthL":[x,y]}
+    landmarks: Optional[dict[str, list[int]]]
 
 
 def _read_image(image_path: Path):
@@ -19,43 +27,55 @@ def _read_image(image_path: Path):
     return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
 
 
-def _detect_yunet(cv2, image) -> list[tuple[int, int, int, int]]:
-    """YuNet(딥러닝 기반) 검출기. Haar보다 기울어진 얼굴·측면에 훨씬 강하다."""
+def _detect_yunet(cv2, image) -> list[DetectedFace]:
+    """YuNet(딥러닝 기반) 검출기. bbox + 5점 랜드마크를 돌려준다.
+
+    YuNet 출력 한 행: [x, y, w, h, rEyeX, rEyeY, lEyeX, lEyeY, noseX, noseY,
+                      mouthRX, mouthRY, mouthLX, mouthLY, score]
+    """
     h, w = image.shape[:2]
     detector = cv2.FaceDetectorYN.create(str(_YUNET_MODEL), "", (w, h), score_threshold=0.6)
     detector.setInputSize((w, h))
     _, faces = detector.detect(image)
     if faces is None:
         return []
-    boxes = []
+    out: list[DetectedFace] = []
     for f in faces:
-        x, y, fw, fh = (int(v) for v in f[:4])
-        # 이미지 경계 밖으로 나간 좌표를 잘라낸다.
-        x, y = max(0, x), max(0, y)
-        boxes.append((x, y, fw, fh))
-    return boxes
+        v = [int(round(x)) for x in f[:14]]
+        x, y = max(0, v[0]), max(0, v[1])
+        out.append({
+            "bbox": (x, y, v[2], v[3]),
+            "landmarks": {
+                "rEye": [v[4], v[5]],
+                "lEye": [v[6], v[7]],
+                "nose": [v[8], v[9]],
+                "mouthR": [v[10], v[11]],
+                "mouthL": [v[12], v[13]],
+            },
+        })
+    return out
 
 
-def _detect_haar(cv2, image) -> list[tuple[int, int, int, int]]:
-    """YuNet 모델이 없을 때의 폴백. 정확도는 낮지만 정면 얼굴은 잡는다."""
+def _detect_haar(cv2, image) -> list[DetectedFace]:
+    """YuNet 모델이 없을 때의 폴백. bbox만 (랜드마크 없음)."""
     classifier = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     boxes = classifier.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
-    return [(int(x), int(y), int(w), int(h)) for x, y, w, h in boxes]
+    return [{"bbox": (int(x), int(y), int(w), int(h)), "landmarks": None} for x, y, w, h in boxes]
 
 
-def detect_faces(image_path: Path) -> list[tuple[int, int, int, int]]:
-    """업로드된 사진에서 얼굴 위치(bbox)를 찾는다 (FACE-01).
+def detect_faces(image_path: Path) -> list[DetectedFace]:
+    """업로드된 사진에서 얼굴 위치(bbox)와 5점 랜드마크를 찾는다 (FACE-01).
 
-    찾은 bbox는 각 인물의 클레임 대상이 된다("이게 나예요"). 검출 순서는 얼굴 index로 쓰인다.
+    bbox는 각 인물의 클레임 대상("이게 나예요")이 되고, 랜드마크(양눈·코·입양끝)는
+    앱의 얼굴 워핑(눈 크기·코·입 보정)의 기준점이 된다.
 
     검출기 우선순위:
-      1. YuNet ONNX (app/models/) — 딥러닝 기반, 정확도 높음
-      2. Haar cascade — YuNet 모델이 없을 때 폴백
-    opencv 미설치 시 빈 목록을 반환한다(클라이언트가 좌표를 직접 보고하는 플로우로 대체 가능).
+      1. YuNet ONNX (app/models/) — 딥러닝 기반, bbox + 5점 랜드마크
+      2. Haar cascade — YuNet 모델이 없을 때 폴백 (bbox만)
+    opencv 미설치 시 빈 목록을 반환한다.
 
-    정밀 검출(눈코입/윤곽 랜드마크)은 실시간 편집 중 온디바이스에서 처리하며,
-    M4에서 MediaPipe Face Mesh로 확장한다(프라이버시: 얼굴 인식 온디바이스 원칙).
+    턱선·눈썹 등 정밀 랜드마크(68/468점)는 M4에서 온디바이스 MediaPipe로 확장한다.
     """
     try:
         import cv2  # noqa: F401

@@ -4,6 +4,8 @@
 /// 서버 JSON은 camelCase 키(inviteToken, claimedByMemberId 등)를 쓴다.
 library;
 
+import 'dart:ui' show Offset;
+
 class SessionDetail {
   const SessionDetail({
     required this.id,
@@ -155,12 +157,55 @@ class Photo {
       );
 }
 
+/// 얼굴 5점 랜드마크 (이미지 픽셀 좌표). 얼굴 워핑의 기준점.
+class FaceLandmarks {
+  const FaceLandmarks({
+    required this.rEye,
+    required this.lEye,
+    required this.nose,
+    required this.mouthR,
+    required this.mouthL,
+  });
+
+  final Offset rEye;
+  final Offset lEye;
+  final Offset nose;
+  final Offset mouthR;
+  final Offset mouthL;
+
+  /// 두 눈 사이 거리 — 워핑 반경의 기준 스케일로 쓴다.
+  double get interocular => (lEye - rEye).distance;
+
+  Offset get mouthCenter => Offset((mouthR.dx + mouthL.dx) / 2, (mouthR.dy + mouthL.dy) / 2);
+
+  static Offset _pt(dynamic v) {
+    final l = v as List<dynamic>;
+    return Offset((l[0] as num).toDouble(), (l[1] as num).toDouble());
+  }
+
+  static FaceLandmarks? fromJson(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    try {
+      return FaceLandmarks(
+        rEye: _pt(json['rEye']),
+        lEye: _pt(json['lEye']),
+        nose: _pt(json['nose']),
+        mouthR: _pt(json['mouthR']),
+        mouthL: _pt(json['mouthL']),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 class Face {
   const Face({
     required this.id,
     required this.faceIndex,
     required this.bbox,
     required this.claimedByMemberId,
+    this.landmarks,
   });
 
   final String id;
@@ -169,6 +214,9 @@ class Face {
   /// [x, y, w, h] — 원본 이미지 픽셀 좌표.
   final List<int> bbox;
   final String? claimedByMemberId;
+
+  /// 5점 랜드마크 (YuNet 검출 시). Haar 폴백이면 null.
+  final FaceLandmarks? landmarks;
 
   bool get isClaimed => claimedByMemberId != null;
 
@@ -180,6 +228,7 @@ class Face {
         faceIndex: json['faceIndex'] as int,
         bbox: (json['bbox'] as List<dynamic>).map((v) => v as int).toList(),
         claimedByMemberId: json['claimedByMemberId'] as String?,
+        landmarks: FaceLandmarks.fromJson(json['landmarks'] as Map<String, dynamic>?),
       );
 
   Face copyWith({Object? claimedByMemberId = _sentinel}) => Face(
@@ -189,6 +238,7 @@ class Face {
         claimedByMemberId: claimedByMemberId == _sentinel
             ? this.claimedByMemberId
             : claimedByMemberId as String?,
+        landmarks: landmarks,
       );
 
   static const _sentinel = Object();

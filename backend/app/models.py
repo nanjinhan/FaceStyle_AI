@@ -90,6 +90,8 @@ class Face(Base):
     bbox_y = Column(Integer, default=0)
     bbox_w = Column(Integer, default=0)
     bbox_h = Column(Integer, default=0)
+    # 5점 랜드마크(양눈·코·입양끝, 이미지 픽셀 좌표) — 얼굴 워핑 기준점. 없으면 None.
+    landmarks = Column(JSON, nullable=True)
     claimed_by_member_id = Column(String, ForeignKey("members.id"), nullable=True)
 
     photo = relationship("Photo", back_populates="faces")

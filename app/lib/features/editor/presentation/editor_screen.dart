@@ -5,6 +5,7 @@ import '../../../core/config.dart';
 import '../../../core/theme/member_colors.dart';
 import '../../room/application/room_controller.dart';
 import '../../room/domain/session_models.dart';
+import '../rendering/face_warp.dart';
 import '../rendering/photo_filter.dart';
 import 'face_overlay.dart';
 
@@ -324,6 +325,15 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     EditState editState,
   ) {
     final url = '${AppConfig.apiBaseUrl}${photo.url}';
+    // 각 얼굴의 랜드마크 + 얼굴 파라미터로 워핑 입력을 만든다.
+    final warps = <FaceWarp>[
+      for (final f in photo.faces)
+        if (f.landmarks != null)
+          FaceWarp(
+            landmarks: f.landmarks!,
+            params: (key) => (editState.valueAt('faces.${f.pathKey}.$key') as num?)?.toDouble() ?? 0,
+          ),
+    ];
     return Container(
       color: Colors.black,
       alignment: Alignment.center,
@@ -332,16 +342,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
         children: [
           _CompareOnHold(
             editState: editState,
-            child: Image.network(
-              url,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stack) => const _Notice(
-                icon: Icons.broken_image_outlined,
-                message: '사진을 불러오지 못했어요.',
-              ),
-              loadingBuilder: (context, child, progress) =>
-                  progress == null ? child : const CircularProgressIndicator(),
-            ),
+            imageSize: Size(photo.width.toDouble(), photo.height.toDouble()),
+            url: url,
+            warps: warps,
           ),
           // 얼굴 상자 + 클레임 + 실시간 커서
           FaceOverlay(
@@ -574,12 +577,20 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   }
 }
 
-/// 길게 누르는 동안 보정을 끄고 원본을 보여준다 (보정 전/후 비교).
+/// 사진을 전역 색보정(ColorFilter) + 얼굴 워핑으로 렌더링한다.
+/// 길게 누르는 동안에는 보정을 전부 끄고 원본을 보여준다 (보정 전/후 비교).
 class _CompareOnHold extends StatefulWidget {
-  const _CompareOnHold({required this.editState, required this.child});
+  const _CompareOnHold({
+    required this.editState,
+    required this.imageSize,
+    required this.url,
+    required this.warps,
+  });
 
   final EditState editState;
-  final Widget child;
+  final Size imageSize;
+  final String url;
+  final List<FaceWarp> warps;
 
   @override
   State<_CompareOnHold> createState() => _CompareOnHoldState();
@@ -590,6 +601,15 @@ class _CompareOnHoldState extends State<_CompareOnHold> {
 
   @override
   Widget build(BuildContext context) {
+    final warpImage = FaceWarpImage(
+      url: widget.url,
+      imageSize: widget.imageSize,
+      warps: _showOriginal ? const [] : widget.warps,
+      errorBuilder: (_) => const _Notice(
+        icon: Icons.broken_image_outlined,
+        message: '사진을 불러오지 못했어요.',
+      ),
+    );
     return GestureDetector(
       onLongPressStart: (_) => setState(() => _showOriginal = true),
       onLongPressEnd: (_) => setState(() => _showOriginal = false),
@@ -599,15 +619,12 @@ class _CompareOnHoldState extends State<_CompareOnHold> {
         children: [
           FilteredPhoto(
             editState: _showOriginal ? null : widget.editState,
-            child: widget.child,
+            child: warpImage,
           ),
           if (_showOriginal)
             const Positioned(
               top: 12,
-              child: Chip(
-                visualDensity: VisualDensity.compact,
-                label: Text('원본'),
-              ),
+              child: Chip(visualDensity: VisualDensity.compact, label: Text('원본')),
             ),
         ],
       ),

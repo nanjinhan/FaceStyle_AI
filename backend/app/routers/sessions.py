@@ -42,6 +42,7 @@ def _session_to_detail(db: Session, session: models.EditSession) -> schemas.Sess
                 schemas.FaceOut(
                     id=f.id, faceIndex=f.face_index,
                     bbox=[f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h],
+                    landmarks=f.landmarks,
                     claimedByMemberId=f.claimed_by_member_id,
                 )
                 for f in photo.faces
@@ -83,8 +84,13 @@ def _store_photo(db: Session, session_id: str, file: UploadFile, order_index: in
     db.flush()
 
     image_path = settings.storage_dir / url.removeprefix("/media/")
-    for idx, (x, y, w, h) in enumerate(detect_faces(image_path)):
-        db.add(models.Face(photo_id=photo.id, face_index=idx, bbox_x=x, bbox_y=y, bbox_w=w, bbox_h=h))
+    for idx, face in enumerate(detect_faces(image_path)):
+        x, y, w, h = face["bbox"]
+        db.add(models.Face(
+            photo_id=photo.id, face_index=idx,
+            bbox_x=x, bbox_y=y, bbox_w=w, bbox_h=h,
+            landmarks=face["landmarks"],
+        ))
     return photo
 
 

@@ -33,6 +33,8 @@ class FaceOut(BaseModel):
     id: str
     faceIndex: int
     bbox: list[int]
+    # 5점 랜드마크(이미지 픽셀): {"rEye":[x,y],"lEye":[x,y],"nose":[x,y],"mouthR":[x,y],"mouthL":[x,y]}
+    landmarks: Optional[dict[str, list[int]]] = None
     claimedByMemberId: Optional[str] = None
 
 
