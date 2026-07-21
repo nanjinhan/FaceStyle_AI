@@ -29,12 +29,16 @@ class EditorScreen extends ConsumerStatefulWidget {
 }
 
 class _EditorScreenState extends ConsumerState<EditorScreen> {
-  /// 지금 얼굴별 슬라이더가 편집 중인 얼굴 키 (예: "face_0"). null이면 전역 보정 모드.
+  /// 지금 얼굴별 슬라이더가 편집 중인 얼굴 키 (= 서버 Face id). null이면 전역 보정 모드.
   String? _selectedFaceKey;
 
   /// 선택된 카테고리 index / 카테고리별로 마지막에 고른 항목 key.
   int _categoryIndex = 0;
   final Map<int, String> _itemPerCategory = {};
+
+  /// 편집 거부 스낵바 스팸 방지용.
+  String? _lastReason;
+  DateTime? _lastRejectAt;
 
   String get sessionId => widget.sessionId;
   String get photoId => widget.photoId;
@@ -82,11 +86,25 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     return _category.items.firstWhere((c) => c.key == key, orElse: () => _category.items.first);
   }
 
-  /// 현재 조절 대상 파라미터 경로. 얼굴 카테고리인데 얼굴 미선택이면 null.
+  /// 현재 조절 대상 파라미터 경로. 편집 불가 상태면 null.
   String? get _paramPath {
     if (!_category.isFace) return 'global.${_item.key}';
     if (_selectedFaceKey == null) return null;
     return 'faces.$_selectedFaceKey.${_item.key}';
+  }
+
+  /// 지금 얼굴 편집이 막힌 이유(안내 문구). 편집 가능하면 null.
+  /// 여기서 미리 막아 서버로 거부될 편집을 아예 보내지 않는다(불필요한 알림 방지).
+  String? _faceBlockReason(RoomState state, Photo photo) {
+    if (!_category.isFace) return null; // 전역 보정
+    if (_selectedFaceKey == null) return '사진에서 내 얼굴을 탭한 뒤 보정할 수 있어요';
+    for (final f in photo.faces) {
+      if (f.pathKey == _selectedFaceKey) {
+        if (f.claimedByMemberId == state.myMemberId) return null; // 내 얼굴 → 편집 가능
+        return '내 얼굴만 보정할 수 있어요. 얼굴을 탭해 "이게 나예요"를 눌러주세요';
+      }
+    }
+    return '얼굴을 다시 선택해 주세요';
   }
 
   @override
@@ -97,11 +115,20 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     // 서버가 편집을 거부하면 그 이유를 알려준다 ("OO님의 영역이에요" 등).
     ref.listen(roomControllerProvider(sessionId), (prev, next) {
       final reason = next.rejection;
-      if (reason == null || reason == prev?.rejection) return;
+      if (reason == null) return;
+      controller.clearRejection();
+      // 같은 사유가 3초 안에 또 오면 무시 (슬라이더 드래그로 거부가 연속될 때 스팸 방지).
+      final now = DateTime.now();
+      if (_lastReason == reason &&
+          _lastRejectAt != null &&
+          now.difference(_lastRejectAt!) < const Duration(seconds: 3)) {
+        return;
+      }
+      _lastReason = reason;
+      _lastRejectAt = now;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(reason)));
-      controller.clearRejection();
+        ..showSnackBar(SnackBar(content: Text(reason), duration: const Duration(seconds: 2)));
     });
 
     return Scaffold(
@@ -377,7 +404,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     Photo photo,
   ) {
     final finalized = state.completionOf(photoId).finalized;
-    final path = _paramPath;
+    // 편집이 막힌 경우 슬라이더 대신 안내만 → 거부될 편집을 서버로 보내지 않는다.
+    final blockReason = _faceBlockReason(state, photo);
+    final path = blockReason == null ? _paramPath : null;
 
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -386,7 +415,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _sliderRow(context, state, controller, editState, finalized, path),
+            _sliderRow(context, state, controller, editState, finalized, path, blockReason),
             const Divider(height: 1),
             _categoryTabs(context),
             _itemChips(context, editState),
@@ -405,12 +434,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     EditState editState,
     bool finalized,
     String? path,
+    String? blockReason,
   ) {
-    // 얼굴 카테고리인데 아직 얼굴을 안 골랐으면 안내만.
+    // 편집 불가 → 슬라이더 대신 안내 (편집 요청을 서버로 보내지 않음).
     if (path == null) {
-      return const SizedBox(
+      return SizedBox(
         height: 56,
-        child: Center(child: Text('사진에서 내 얼굴을 탭한 뒤 보정할 수 있어요')),
+        child: Center(
+          child: Text(
+            blockReason ?? '사진에서 내 얼굴을 탭한 뒤 보정할 수 있어요',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            textAlign: TextAlign.center,
+          ),
+        ),
       );
     }
 

@@ -13,6 +13,7 @@ import '../../features/home/presentation/home_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/room/presentation/join_screen.dart';
 import '../../features/room/presentation/room_screen.dart';
+import '../../features/splash/presentation/splash_screen.dart';
 
 /// 화면 라우팅. 명세서 페이지 구성(1.회원관리 / 2.홈 / 3.실시간 방 / 4.앨범)과 1:1 대응.
 ///
@@ -26,7 +27,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   ref.onDispose(refresh.dispose);
 
   return GoRouter(
-    initialLocation: '/home',
+    initialLocation: '/splash',
     refreshListenable: refresh,
     redirect: (context, state) {
       final auth = ref.read(authControllerProvider);
@@ -34,17 +35,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // 초대로 들어오는 경로는 로그인 없이 허용 (게스트 참여)
       final isGuestPath = loc.startsWith('/join');
       final isLoginPath = loc == '/login';
+      final isSplash = loc == '/splash';
 
       switch (auth.status) {
         case AuthStatus.unknown:
-          return null; // 토큰 복원 중 — 그대로 둔다
+          // 토큰 복원 중 — 스플래시를 보여준다.
+          return isSplash ? null : '/splash';
         case AuthStatus.signedOut:
           return (isLoginPath || isGuestPath) ? null : '/login';
         case AuthStatus.signedIn:
-          return isLoginPath ? '/home' : null;
+          return (isLoginPath || isSplash) ? '/home' : null;
       }
     },
     routes: [
+      GoRoute(path: '/splash', builder: (_, _) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/nickname', builder: (_, _) => const NicknameScreen()),
       GoRoute(path: '/mypage', builder: (_, _) => const MyPageScreen()),

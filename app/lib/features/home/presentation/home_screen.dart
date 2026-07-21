@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/theme/brand.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../room/data/room_repository.dart';
 
@@ -72,29 +73,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           if (user != null)
             Text('${user.nickname}님, 반가워요 👋',
-                style: Theme.of(context).textTheme.titleMedium),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('친구들과 같이 보정하기',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  const Text('단체사진을 올리면 각자 자기 얼굴을 실시간으로 보정할 수 있어요.'),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: _creating ? null : _createRoom,
-                    icon: _creating
-                        ? const SizedBox(
-                            height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.group_add),
-                    label: Text(_creating ? '방 만드는 중…' : '사진 올려서 방 만들기'),
+          // 메인 CTA — 브랜드 그라데이션 히어로 카드.
+          Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              gradient: Brand.gradient,
+              borderRadius: BorderRadius.circular(Brand.radiusLg),
+              boxShadow: [
+                BoxShadow(
+                  color: Brand.primary.withValues(alpha: 0.3),
+                  blurRadius: 24,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.auto_awesome, color: Colors.white, size: 22),
+                    SizedBox(width: 8),
+                    Text('친구들과 같이 보정하기',
+                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '단체사진을 올리면 각자 자기 얼굴을\n실시간으로 보정할 수 있어요.',
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.9), height: 1.4),
+                ),
+                const SizedBox(height: 18),
+                GradientButton(
+                  onPressed: _createRoom,
+                  busy: _creating,
+                  gradient: const LinearGradient(colors: [Colors.white, Colors.white]),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_photo_alternate_outlined, color: Brand.primary),
+                      SizedBox(width: 8),
+                      Text('사진 올려서 방 만들기', style: TextStyle(color: Brand.primary)),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 12),
