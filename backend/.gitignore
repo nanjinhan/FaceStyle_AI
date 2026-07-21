@@ -4,3 +4,4 @@ __pycache__/
 togethersnap.db
 storage/
 .pytest_cache/
+test_photos/
