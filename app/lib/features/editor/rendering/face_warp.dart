@@ -97,7 +97,13 @@ class _FaceWarpImageState extends State<FaceWarpImage> {
     }
     final image = _image;
     if (image == null) return const Center(child: CircularProgressIndicator());
-    // SizedBox.expand 로 부모 크기를 꽉 채워 페인터에 유효한 size를 준다.
+
+    // 워핑이 없으면 검증된 RawImage 로 그대로 표시 (확실히 렌더된다).
+    final hasWarp = widget.warps.any((w) => w.hasAny);
+    if (!hasWarp) {
+      return RawImage(image: image, fit: BoxFit.contain);
+    }
+    // 워핑이 있을 때만 메시 페인터. SizedBox.expand 로 유효한 size 부여.
     return SizedBox.expand(
       child: CustomPaint(
         painter: FaceWarpPainter(image, widget.imageSize, widget.warps),

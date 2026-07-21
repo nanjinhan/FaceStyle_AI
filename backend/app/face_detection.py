@@ -64,6 +64,22 @@ def _detect_haar(cv2, image) -> list[DetectedFace]:
     return [{"bbox": (int(x), int(y), int(w), int(h)), "landmarks": None} for x, y, w, h in boxes]
 
 
+def image_size(image_path: Path) -> tuple[int, int]:
+    """이미지의 (width, height) 픽셀 크기. 읽기 실패 시 (0, 0).
+
+    앱의 얼굴 상자·워핑이 이 크기를 기준으로 좌표를 매핑하므로 반드시 저장해야 한다.
+    """
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        return (0, 0)
+    image = _read_image(image_path)
+    if image is None:
+        return (0, 0)
+    h, w = image.shape[:2]
+    return (int(w), int(h))
+
+
 def detect_faces(image_path: Path) -> list[DetectedFace]:
     """업로드된 사진에서 얼굴 위치(bbox)와 5점 랜드마크를 찾는다 (FACE-01).
 

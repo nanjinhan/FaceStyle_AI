@@ -11,7 +11,7 @@ from ..collab.manager import connection_manager
 from ..collab.state import edit_state_store
 from ..config import settings
 from ..database import get_db
-from ..face_detection import detect_faces
+from ..face_detection import detect_faces, image_size
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -79,11 +79,15 @@ def _store_photo(db: Session, session_id: str, file: UploadFile, order_index: in
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-    photo = models.Photo(session_id=session_id, url=url, order_index=order_index)
+    image_path = settings.storage_dir / url.removeprefix("/media/")
+    width, height = image_size(image_path)
+    photo = models.Photo(
+        session_id=session_id, url=url, order_index=order_index,
+        width=width, height=height,
+    )
     db.add(photo)
     db.flush()
 
-    image_path = settings.storage_dir / url.removeprefix("/media/")
     for idx, face in enumerate(detect_faces(image_path)):
         x, y, w, h = face["bbox"]
         db.add(models.Face(

@@ -93,6 +93,8 @@ class FaceOverlay extends StatelessWidget {
       width: w,
       height: h,
       child: GestureDetector(
+        // 상자 속이 투명해도 전체 영역이 탭을 받도록 opaque 로 설정.
+        behavior: HitTestBehavior.opaque,
         onTap: () => _onTapFace(context, face, isMine, isTaken),
         onLongPress: isMine ? () => _confirmUnclaim(context, face) : null,
         child: Container(
@@ -102,7 +104,8 @@ class FaceOverlay extends StatelessWidget {
               width: isSelected ? 3.5 : 2,
             ),
             borderRadius: BorderRadius.circular(6),
-            color: isMine ? color.withValues(alpha: 0.12) : null,
+            // 빈 얼굴도 아주 옅게 채워 탭 영역이 명확하게 보이도록.
+            color: isMine ? color.withValues(alpha: 0.12) : color.withValues(alpha: 0.06),
           ),
           child: Stack(
             clipBehavior: Clip.none,
