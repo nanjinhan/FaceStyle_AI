@@ -615,6 +615,7 @@ class _CompareOnHoldState extends State<_CompareOnHold> {
       onLongPressEnd: (_) => setState(() => _showOriginal = false),
       onLongPressCancel: () => setState(() => _showOriginal = false),
       child: Stack(
+        fit: StackFit.expand,
         alignment: Alignment.center,
         children: [
           FilteredPhoto(

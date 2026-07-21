@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/config.dart';
@@ -100,16 +101,34 @@ final roomRepositoryProvider = Provider<RoomRepository>(
 
 /// 방별 member 토큰 보관소. 참여(join) 시 저장하고, WS 연결/세션 재조회에 쓴다.
 ///
-/// M2에서 딥링크/게스트 join 플로우가 이 store에 토큰을 채운다.
-/// 현재는 인메모리 — 앱 재시작 시 재참여 필요.
+/// shared_preferences 에 영속화해 새로고침/재시작해도 방에 그대로 남는다.
 class MemberTokenStore extends Notifier<Map<String, String>> {
+  static const _prefsKey = 'member_tokens';
+
   @override
-  Map<String, String> build() => const {};
+  Map<String, String> build() {
+    _restore();
+    return const {};
+  }
+
+  Future<void> _restore() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_prefsKey);
+    if (raw == null) return;
+    final map = (jsonDecode(raw) as Map<String, dynamic>).map((k, v) => MapEntry(k, v as String));
+    state = map;
+  }
+
+  Future<void> _persist() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsKey, jsonEncode(state));
+  }
 
   String? tokenFor(String sessionId) => state[sessionId];
 
   void save(String sessionId, String token) {
     state = {...state, sessionId: token};
+    _persist();
   }
 }
 

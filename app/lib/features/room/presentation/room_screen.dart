@@ -26,6 +26,11 @@ class RoomScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.home_outlined),
+          tooltip: '홈',
+          onPressed: () => context.go('/home'),
+        ),
         title: const Text('같이 보정하기'),
         actions: [
           if (state.session != null)
@@ -46,9 +51,11 @@ class RoomScreen extends ConsumerWidget {
       case RoomConnection.idle:
         return const Center(child: CircularProgressIndicator());
       case RoomConnection.needsJoin:
-        return const _RoomNotice(
+        return _RoomNotice(
           icon: Icons.link_off,
-          message: '이 방에 참여한 기록이 없어요.\n초대 링크나 코드로 입장해 주세요.',
+          message: '이 방에 참여한 기록이 없어요.\n홈에서 새로 만들거나 초대 코드로 입장해 주세요.',
+          onRetry: () => context.go('/home'),
+          retryLabel: '홈으로',
         );
       case RoomConnection.error:
         return _RoomNotice(
@@ -195,11 +202,17 @@ class RoomScreen extends ConsumerWidget {
 }
 
 class _RoomNotice extends StatelessWidget {
-  const _RoomNotice({required this.icon, required this.message, this.onRetry});
+  const _RoomNotice({
+    required this.icon,
+    required this.message,
+    this.onRetry,
+    this.retryLabel = '다시 시도',
+  });
 
   final IconData icon;
   final String message;
   final VoidCallback? onRetry;
+  final String retryLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +227,7 @@ class _RoomNotice extends StatelessWidget {
             Text(message, textAlign: TextAlign.center),
             if (onRetry != null) ...[
               const SizedBox(height: 12),
-              FilledButton.tonal(onPressed: onRetry, child: const Text('다시 시도')),
+              FilledButton.tonal(onPressed: onRetry, child: Text(retryLabel)),
             ],
           ],
         ),

@@ -97,9 +97,11 @@ class _FaceWarpImageState extends State<FaceWarpImage> {
     }
     final image = _image;
     if (image == null) return const Center(child: CircularProgressIndicator());
-    return CustomPaint(
-      painter: FaceWarpPainter(image, widget.imageSize, widget.warps),
-      size: Size.infinite,
+    // SizedBox.expand 로 부모 크기를 꽉 채워 페인터에 유효한 size를 준다.
+    return SizedBox.expand(
+      child: CustomPaint(
+        painter: FaceWarpPainter(image, widget.imageSize, widget.warps),
+      ),
     );
   }
 }
