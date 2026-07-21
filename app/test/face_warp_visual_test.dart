@@ -35,15 +35,16 @@ void main() {
       final cases = <(String, List<FaceWarp>)>[
         ('원본', const []),
         ('눈 +100', [warp({'eyeScale': 100})]),
-        ('눈 -60', [warp({'eyeScale': -60})]),
+        ('피부 +100', [warp({'skinSmooth': 100})]),
+        ('피부+눈', [warp({'skinSmooth': 80, 'eyeScale': 60})]),
       ];
 
-      // 눈 영역만 바짝 확대 (변형이 명확히 보이도록). 두 눈을 감싸는 박스.
-      final cx = (landmarks.rEye.dx + landmarks.lEye.dx) / 2;
-      final cy = (landmarks.rEye.dy + landmarks.lEye.dy) / 2;
-      const cropW = 110.0, cropH = 70.0;
+      // 얼굴 전체가 보이게 크롭 (피부 스무딩 확인).
+      final cx = landmarks.nose.dx;
+      final cy = (landmarks.rEye.dy + landmarks.mouthCenter.dy) / 2;
+      const cropW = 130.0, cropH = 150.0;
       final cropRect = Rect.fromCenter(center: Offset(cx, cy), width: cropW, height: cropH);
-      const scale = 4.0; // 4배 확대 출력
+      const scale = 3.0; // 3배 확대 출력
 
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);

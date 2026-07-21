@@ -10,10 +10,11 @@ class FaceWarp {
 
   final FaceLandmarks landmarks;
 
-  /// faces.{face}.* 파라미터 값 (-100..100). eyeScale / lipScale / noseWidth / faceSlim 등.
+  /// faces.{face}.* 파라미터 값 (-100..100). eyeScale / lipScale / skinSmooth 등.
   final double Function(String key) params;
 
-  bool get hasAny =>
+  /// 형태 변형(메시 워핑)이 필요한 값이 있는가.
+  bool get hasGeometry =>
       params('eyeScale') != 0 ||
       params('lipScale') != 0 ||
       params('noseWidth') != 0 ||
@@ -21,6 +22,12 @@ class FaceWarp {
       params('faceSlim') != 0 ||
       params('jawSlim') != 0 ||
       params('cheekbone') != 0;
+
+  /// 피부 스무딩(블러 블렌드)이 필요한가.
+  bool get hasSkin => params('skinSmooth') > 0 || params('blemishRemoval') > 0;
+
+  /// 렌더러가 개입해야 하는 어떤 효과라도 있는가.
+  bool get hasAny => hasGeometry || hasSkin;
 }
 
 /// 얼굴 파라미터를 실제 픽셀 변형으로 렌더링한다 (A7 확장 / M4).
@@ -134,10 +141,10 @@ class FaceWarpPainter extends CustomPainter {
 
     Offset toCanvas(Offset img) => Offset(rect.left + img.dx * sx, rect.top + img.dy * sy);
 
-    final active = warps.where((w) => w.hasAny).toList();
+    final geom = warps.where((w) => w.hasGeometry).toList();
 
-    // 워핑이 없으면 이미지를 그대로 그린다 (원본 화질).
-    if (active.isEmpty) {
+    // 1) 베이스: 형태 변형이 있으면 메시, 없으면 원본 그대로.
+    if (geom.isEmpty) {
       paintImage(
         canvas: canvas,
         rect: rect,
@@ -145,9 +152,17 @@ class FaceWarpPainter extends CustomPainter {
         fit: BoxFit.fill,
         filterQuality: FilterQuality.high,
       );
-      return;
+    } else {
+      _paintMesh(canvas, geom, toCanvas);
     }
 
+    // 2) 피부 스무딩: 얼굴 영역을 블러해서 원본 위에 부드럽게 얹는다.
+    for (final w in warps) {
+      if (w.hasSkin) _paintSkinSmooth(canvas, w, rect, toCanvas, (sx + sy) / 2);
+    }
+  }
+
+  void _paintMesh(Canvas canvas, List<FaceWarp> geom, Offset Function(Offset) toCanvas) {
     final positions = <Offset>[];
     final texCoords = <Offset>[];
     for (var r = 0; r <= _rows; r++) {
@@ -156,7 +171,7 @@ class FaceWarpPainter extends CustomPainter {
           imageSize.width * c / _cols,
           imageSize.height * r / _rows,
         );
-        final warped = _warpPoint(imgPt, active);
+        final warped = _warpPoint(imgPt, geom);
         texCoords.add(imgPt); // UV = 원본 이미지 픽셀 좌표
         positions.add(toCanvas(warped)); // 위치 = 변형 후 → 캔버스
       }
@@ -182,6 +197,51 @@ class FaceWarpPainter extends CustomPainter {
       ..filterQuality = FilterQuality.high
       ..shader = ImageShader(image, TileMode.clamp, TileMode.clamp, Matrix4.identity().storage);
     canvas.drawVertices(vertices, BlendMode.srcOver, paint);
+  }
+
+  /// 피부 스무딩 — 얼굴 타원 영역에 블러한 이미지를 반투명하게 얹는다.
+  ///
+  /// 눈·입은 또렷해야 하므로 그 부분은 스무딩에서 제외(작은 타원으로 도려냄)한다.
+  /// 정식 주파수 분리(결/톤)는 M4에서. 여기서는 가우시안 블러 블렌드로 근사한다.
+  void _paintSkinSmooth(
+    Canvas canvas,
+    FaceWarp w,
+    Rect imageRect,
+    Offset Function(Offset) toCanvas,
+    double avgScale,
+  ) {
+    final lm = w.landmarks;
+    final smooth = w.params('skinSmooth').clamp(0, 100) / 100;
+    final blemish = w.params('blemishRemoval').clamp(0, 100) / 100;
+    final amount = (smooth + blemish * 1.1).clamp(0.0, 1.0);
+    if (amount <= 0) return;
+
+    final eyeDist = lm.interocular.clamp(1.0, double.infinity);
+    // 얼굴 타원(이미지 좌표): 눈~입을 감싸고 볼까지 덮는다.
+    final faceCenter = Offset(
+      lm.nose.dx,
+      (lm.rEye.dy + lm.lEye.dy) / 2 * 0.5 + lm.mouthCenter.dy * 0.5,
+    );
+    final rx = eyeDist * 1.35;
+    final ry = eyeDist * 1.85;
+    final faceOval = Rect.fromCenter(
+      center: toCanvas(faceCenter),
+      width: rx * 2 * avgScale,
+      height: ry * 2 * avgScale,
+    );
+
+    // 블러 세기: 피부 결만 부드럽게 (약하게). 얼굴 크기에 비례.
+    final sigma = (eyeDist * avgScale) * (0.03 + amount * 0.05);
+    // 불투명도: 원본이 충분히 비쳐 눈·입이 살아있도록 최대 55%만 블렌드.
+    final opacity = amount * 0.55;
+
+    canvas.saveLayer(faceOval, Paint()..color = Color.fromRGBO(0, 0, 0, opacity));
+    canvas.clipPath(Path()..addOval(faceOval), doAntiAlias: true);
+    final blurPaint = Paint()
+      ..filterQuality = FilterQuality.high
+      ..imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.clamp);
+    canvas.drawImageRect(image, Offset.zero & imageSize, imageRect, blurPaint);
+    canvas.restore();
   }
 
   /// 이미지 픽셀 좌표 한 점에 모든 얼굴의 워핑을 누적 적용한다.
