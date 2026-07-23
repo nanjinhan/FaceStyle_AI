@@ -34,6 +34,21 @@ class AlbumRepository {
     return AlbumDetail.fromJson(json);
   }
 
+  /// 앨범 사진 편집 세션을 연다 → (sessionId, photoId, memberToken).
+  /// 앱은 이 값으로 실시간 방 에디터를 그대로 연다.
+  Future<({String sessionId, String photoId, String memberToken})> openEditSession(
+    String albumId,
+    String albumPhotoId,
+  ) async {
+    final j = await _api.post('/albums/$albumId/photos/$albumPhotoId/edit-session')
+        as Map<String, dynamic>;
+    return (
+      sessionId: j['sessionId'] as String,
+      photoId: j['photoId'] as String,
+      memberToken: j['memberToken'] as String,
+    );
+  }
+
   /// 사진 여러 장 업로드 (멀티파트).
   Future<AlbumDetail> uploadPhotos(String albumId, List<({String filename, Uint8List bytes})> photos) async {
     final token = _api.userToken;

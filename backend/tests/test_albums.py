@@ -110,6 +110,53 @@ class TestPhotos:
         assert summary["coverUrl"] is not None
 
 
+class TestEditSession:
+    """앨범 사진 편집 진입 — 장수명 세션 생성/재사용 (명세 4장 비동기 보정)."""
+
+    def _album_with_photo(self, client):
+        token, uid = make_user(client, "지우")
+        album = create_album(client, token)
+        files = [("files", ("p.png", PNG_1X1, "image/png"))]
+        detail = client.post(f"/albums/{album['id']}/photos", files=files, headers=auth_header(token)).json()
+        return token, uid, album, detail["photos"][0]
+
+    def test_편집_세션을_열면_핸들을_받는다(self, client):
+        token, _, album, photo = self._album_with_photo(client)
+        res = client.post(
+            f"/albums/{album['id']}/photos/{photo['id']}/edit-session",
+            headers=auth_header(token),
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["sessionId"] and body["photoId"] and body["memberToken"]
+
+    def test_같은_사진은_같은_세션을_재사용한다(self, client):
+        token, _, album, photo = self._album_with_photo(client)
+        h1 = client.post(f"/albums/{album['id']}/photos/{photo['id']}/edit-session", headers=auth_header(token)).json()
+        h2 = client.post(f"/albums/{album['id']}/photos/{photo['id']}/edit-session", headers=auth_header(token)).json()
+        assert h1["sessionId"] == h2["sessionId"]
+        assert h1["photoId"] == h2["photoId"]
+
+    def test_다른_멤버도_같은_사진_세션에_참여한다(self, client):
+        owner, _, album, photo = self._album_with_photo(client)
+        guest, _ = make_user(client, "수진")
+        client.post("/albums/join", json={"invite": album["inviteCode"]}, headers=auth_header(guest))
+
+        h_owner = client.post(f"/albums/{album['id']}/photos/{photo['id']}/edit-session", headers=auth_header(owner)).json()
+        h_guest = client.post(f"/albums/{album['id']}/photos/{photo['id']}/edit-session", headers=auth_header(guest)).json()
+        assert h_owner["sessionId"] == h_guest["sessionId"]  # 같은 세션
+        assert h_owner["memberToken"] != h_guest["memberToken"]  # 각자 다른 멤버 토큰
+
+    def test_멤버가_아니면_편집_세션을_못_연다(self, client):
+        _owner, _, album, photo = self._album_with_photo(client)
+        outsider, _ = make_user(client, "낯선사람")
+        res = client.post(
+            f"/albums/{album['id']}/photos/{photo['id']}/edit-session",
+            headers=auth_header(outsider),
+        )
+        assert res.status_code == 403
+
+
 class TestMembershipRules:
     def test_멤버가_아니면_상세를_못_본다(self, client):
         owner, _ = make_user(client, "지우")

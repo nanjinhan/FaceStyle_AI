@@ -137,3 +137,10 @@ class CreateAlbumRequest(BaseModel):
 
 class AlbumJoinRequest(BaseModel):
     invite: str  # invite_token 또는 invite_code
+
+
+class EditSessionHandle(BaseModel):
+    """앨범 사진 편집 진입 정보 — 앱이 이 값으로 실시간 방 에디터를 그대로 연다."""
+    sessionId: str
+    photoId: str
+    memberToken: str

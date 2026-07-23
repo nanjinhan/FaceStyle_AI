@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/config.dart';
+import '../../room/data/room_repository.dart';
 import '../data/album_models.dart';
 import '../data/album_repository.dart';
 
@@ -56,6 +58,20 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
       }
     } finally {
       if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  /// 사진 탭 → 편집 세션 열고 실시간 방 에디터로 진입 (앨범 비동기 보정).
+  Future<void> _openPhoto(AlbumPhotoInfo photo) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final handle = await ref.read(albumRepositoryProvider).openEditSession(widget.albumId, photo.id);
+      ref.read(memberTokenStoreProvider.notifier).save(handle.sessionId, handle.memberToken);
+      if (mounted) {
+        context.push('/rooms/${handle.sessionId}/photos/${handle.photoId}/edit');
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('편집을 열지 못했어요: $e')));
     }
   }
 
@@ -150,24 +166,27 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
   }
 
   Widget _photoTile(AlbumPhotoInfo p) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.network(
-            '${AppConfig.apiBaseUrl}${p.url}',
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) =>
-                Container(color: Colors.black12, child: const Icon(Icons.broken_image_outlined)),
-          ),
-          if (p.finalized)
-            const Positioned(
-              right: 4,
-              top: 4,
-              child: Icon(Icons.check_circle, color: Colors.white, size: 20),
+    return GestureDetector(
+      onTap: () => _openPhoto(p),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              '${AppConfig.apiBaseUrl}${p.url}',
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+                  Container(color: Colors.black12, child: const Icon(Icons.broken_image_outlined)),
             ),
-        ],
+            if (p.finalized)
+              const Positioned(
+                right: 4,
+                top: 4,
+                child: Icon(Icons.check_circle, color: Colors.white, size: 20),
+              ),
+          ],
+        ),
       ),
     );
   }

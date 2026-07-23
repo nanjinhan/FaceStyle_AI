@@ -1,13 +1,15 @@
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas, security, storage
+from ..collab.state import edit_state_store
+from ..config import settings
 from ..database import get_db
-from ..face_detection import image_size
+from ..face_detection import detect_faces, image_size
 
 router = APIRouter(prefix="/albums", tags=["albums"])
 
@@ -172,6 +174,86 @@ def upload_album_photos(
     db.commit()
     db.refresh(album)
     return _detail(db, album, current_user)
+
+
+@router.post("/{album_id}/photos/{album_photo_id}/edit-session", response_model=schemas.EditSessionHandle)
+def open_album_photo_editor(
+    album_id: str,
+    album_photo_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """앨범 사진을 편집하러 들어간다 (명세 4장 "비동기 보정 — 실시간 방과 동일 권한 정책").
+
+    구현: 앨범 사진마다 **장수명 EditSession 하나**를 만들어 실시간 방 에디터를 그대로
+    재사용한다. 얼굴 클레임·워핑·피부·저장·완료확정 로직이 세션 기반이라 전부 그대로 동작하고,
+    비동기(각자 다른 시간에 편집)를 위해 세션은 사실상 만료되지 않게 둔다.
+    """
+    album = db.get(models.Album, album_id)
+    if album is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "앨범을 찾을 수 없어요")
+    _membership(db, album_id, current_user.id)
+
+    ap = db.get(models.AlbumPhoto, album_photo_id)
+    if ap is None or ap.album_id != album_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "사진을 찾을 수 없어요")
+
+    # 1) 이 앨범 사진에 아직 편집 세션이 없으면 만든다.
+    if ap.photo_id is None:
+        session = models.EditSession(
+            host_user_id=album.owner_user_id,
+            invite_code=_gen_invite_code(),
+            max_members=settings.max_members,
+            # 앨범은 비동기라 사실상 만료되지 않게 둔다.
+            expires_at=datetime.utcnow() + timedelta(days=3650),
+            # 앨범 사진엔 상주 방장이 없으므로 공용 톤 보정은 전원 허용.
+            global_edit_policy="everyone",
+        )
+        db.add(session)
+        db.flush()
+
+        photo = models.Photo(
+            session_id=session.id, url=ap.url, width=ap.width, height=ap.height,
+        )
+        db.add(photo)
+        db.flush()
+
+        image_path = settings.storage_dir / ap.url.removeprefix("/media/")
+        for idx, face in enumerate(detect_faces(image_path)):
+            x, y, w, h = face["bbox"]
+            db.add(models.Face(
+                photo_id=photo.id, face_index=idx,
+                bbox_x=x, bbox_y=y, bbox_w=w, bbox_h=h, landmarks=face["landmarks"],
+            ))
+        ap.photo_id = photo.id
+        db.commit()
+        edit_state_store.get(db, photo.id)
+
+    photo = db.get(models.Photo, ap.photo_id)
+    session = photo.session
+
+    # 2) 현재 유저를 세션 멤버로 보장한다(이미 있으면 재사용).
+    member = (
+        db.query(models.Member)
+        .filter(
+            models.Member.session_id == session.id,
+            models.Member.user_id == current_user.id,
+            models.Member.left_at.is_(None),
+        )
+        .first()
+    )
+    if member is None:
+        member = models.Member(
+            session_id=session.id, user_id=current_user.id,
+            nickname=current_user.nickname,
+            role="host" if current_user.id == album.owner_user_id else "guest",
+        )
+        db.add(member)
+        db.commit()
+        db.refresh(member)
+
+    token = security.create_member_token(member.id, session.id)
+    return schemas.EditSessionHandle(sessionId=session.id, photoId=photo.id, memberToken=token)
 
 
 @router.post("/{album_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
