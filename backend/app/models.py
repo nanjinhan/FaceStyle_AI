@@ -149,3 +149,56 @@ class ExportResult(Base):
     photo_id = Column(String, ForeignKey("photos.id"), nullable=False)
     url = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── 앨범 (비동기 협업, 명세 4장) ───────────────────────────────────────────
+# 실시간 방(EditSession)이 24시간 즉석 협업이라면, 앨범은 친구 그룹이 오래 두고
+# 각자 편한 시간에 사진을 올리고 보정하는 공간이다.
+
+
+class Album(Base):
+    __tablename__ = "albums"
+
+    id = Column(String, primary_key=True, default=lambda: new_id("album"))
+    name = Column(String, nullable=False)
+    owner_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    invite_token = Column(String, unique=True, nullable=False, default=lambda: uuid.uuid4().hex)
+    invite_code = Column(String, unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    members = relationship("AlbumMember", back_populates="album", cascade="all, delete-orphan")
+    photos = relationship("AlbumPhoto", back_populates="album", cascade="all, delete-orphan")
+
+
+class AlbumMember(Base):
+    __tablename__ = "album_members"
+
+    id = Column(String, primary_key=True, default=lambda: new_id("amem"))
+    album_id = Column(String, ForeignKey("albums.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    role = Column(String, nullable=False)  # owner | member
+    notifications_on = Column(Boolean, default=True)  # 앨범별 알림 on/off
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    album = relationship("Album", back_populates="members")
+    user = relationship("User")
+
+    __table_args__ = (UniqueConstraint("album_id", "user_id", name="uq_album_member"),)
+
+
+class AlbumPhoto(Base):
+    __tablename__ = "album_photos"
+
+    id = Column(String, primary_key=True, default=lambda: new_id("aphoto"))
+    album_id = Column(String, ForeignKey("albums.id"), nullable=False)
+    uploader_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    url = Column(String, nullable=False)
+    width = Column(Integer, default=0)
+    height = Column(Integer, default=0)
+    # 사진 편집 상태는 실시간 방과 같은 모델을 공유한다 — 대응하는 Photo 행의 id.
+    # (앨범 사진도 얼굴 클레임·보정 파라미터를 Photo/Face/EditStateRecord로 관리)
+    photo_id = Column(String, ForeignKey("photos.id"), nullable=True)
+    finalized_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    album = relationship("Album", back_populates="photos")

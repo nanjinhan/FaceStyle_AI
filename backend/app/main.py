@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import Base, engine
-from .routers import auth, faces, sessions, ws
+from .routers import albums, auth, faces, sessions, ws
 
 Base.metadata.create_all(bind=engine)
 
@@ -22,6 +22,7 @@ app.mount("/media", StaticFiles(directory=settings.storage_dir), name="media")
 app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(faces.router)
+app.include_router(albums.router)
 app.include_router(ws.router)
 
 

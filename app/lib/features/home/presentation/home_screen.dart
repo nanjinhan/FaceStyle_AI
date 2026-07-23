@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/brand.dart';
+import '../../album/data/album_repository.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../room/data/room_repository.dart';
 
@@ -132,15 +133,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          // TODO(M3): 내 앨범 목록 + 할 일 배너
-          Text('내 앨범', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.photo_album_outlined),
-              title: Text('앨범 기능은 준비 중이에요 (M3)'),
-            ),
+          Row(
+            children: [
+              Text('내 앨범', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _createAlbum,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('새 앨범'),
+              ),
+            ],
           ),
+          const SizedBox(height: 8),
+          _albumList(context),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -149,5 +154,88 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: const Icon(Icons.photo_camera),
       ),
     );
+  }
+
+  /// 내 앨범 목록 — 로드/빈/에러 상태 처리.
+  Widget _albumList(BuildContext context) {
+    final async = ref.watch(myAlbumsProvider);
+    return async.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (e, _) => Card(
+        child: ListTile(
+          leading: const Icon(Icons.error_outline),
+          title: const Text('앨범을 불러오지 못했어요'),
+          subtitle: Text('$e', maxLines: 2, overflow: TextOverflow.ellipsis),
+          onTap: () => ref.invalidate(myAlbumsProvider),
+        ),
+      ),
+      data: (albums) {
+        if (albums.isEmpty) {
+          return const Card(
+            child: ListTile(
+              leading: Icon(Icons.photo_album_outlined),
+              title: Text('아직 앨범이 없어요'),
+              subtitle: Text('"새 앨범"으로 친구들과 사진을 모아보세요'),
+            ),
+          );
+        }
+        return Column(
+          children: [
+            for (final a in albums)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Card(
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Brand.primary.withValues(alpha: 0.12),
+                      foregroundColor: Brand.primary,
+                      child: const Icon(Icons.photo_library_outlined),
+                    ),
+                    title: Text(a.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('사진 ${a.photoCount} · 멤버 ${a.memberCount}'
+                        '${a.role == "owner" ? " · 방장" : ""}'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push('/albums/${a.id}'),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 새 앨범 만들기 — 이름 입력 → 생성 → 상세로 이동.
+  Future<void> _createAlbum() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('새 앨범'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '앨범 이름 (예: 제주 여행)'),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('만들기')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    try {
+      final album = await ref.read(albumRepositoryProvider).create(name);
+      ref.invalidate(myAlbumsProvider);
+      if (mounted) context.push('/albums/${album.id}');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('앨범을 만들지 못했어요: $e')));
+      }
+    }
   }
 }

@@ -86,3 +86,54 @@ class ExportOut(BaseModel):
     photoId: str
     url: str
     createdAt: datetime
+
+
+# ── 앨범 (명세 4장) ────────────────────────────────────────────────────────
+
+
+class AlbumMemberOut(BaseModel):
+    id: str
+    userId: str
+    nickname: str
+    role: str  # owner | member
+    color: Optional[str] = None
+
+
+class AlbumPhotoOut(BaseModel):
+    id: str
+    url: str
+    width: int
+    height: int
+    uploaderUserId: str
+    finalized: bool = False
+    createdAt: datetime
+
+
+class AlbumSummary(BaseModel):
+    """홈 목록용 요약."""
+    id: str
+    name: str
+    ownerUserId: str
+    role: str
+    memberCount: int
+    photoCount: int
+    coverUrl: Optional[str] = None
+
+
+class AlbumDetail(BaseModel):
+    id: str
+    name: str
+    ownerUserId: str
+    inviteToken: str
+    inviteCode: str
+    myRole: str
+    members: list[AlbumMemberOut]
+    photos: list[AlbumPhotoOut]
+
+
+class CreateAlbumRequest(BaseModel):
+    name: str
+
+
+class AlbumJoinRequest(BaseModel):
+    invite: str  # invite_token 또는 invite_code
