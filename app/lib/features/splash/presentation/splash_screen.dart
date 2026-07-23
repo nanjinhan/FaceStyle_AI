@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/brand.dart';
+import '../../../core/ui/ui.dart';
 
 /// 초기 로딩 화면. 저장된 로그인 토큰을 복원하는 동안(AuthStatus.unknown) 표시된다.
 /// 복원이 끝나면 라우터가 홈 또는 로그인으로 보낸다.
@@ -23,47 +23,30 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(gradient: Brand.softGradient),
-        child: Center(
-          child: FadeTransition(
-            opacity: _c,
-            child: ScaleTransition(
-              scale: Tween(begin: 0.85, end: 1.0).animate(
-                CurvedAnimation(parent: _c, curve: Curves.easeOutBack),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 96,
-                    height: 96,
-                    decoration: BoxDecoration(
-                      gradient: Brand.gradient,
-                      borderRadius: BorderRadius.circular(28),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Brand.primary.withValues(alpha: 0.4),
-                          blurRadius: 30,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(Icons.auto_awesome, color: Colors.white, size: 48),
-                  ),
-                  const SizedBox(height: 24),
-                  GradientText(
-                    'FaceStyle',
-                    style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '친구들과 같이 보정하는 단체 사진',
-                    style: TextStyle(color: Colors.black.withValues(alpha: 0.55)),
-                  ),
-                ],
-              ),
+      body: Center(
+        child: FadeTransition(
+          opacity: _c,
+          child: ScaleTransition(
+            scale: Tween(begin: 0.9, end: 1.0).animate(
+              CurvedAnimation(parent: _c, curve: Curves.easeOutCubic),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const BrandMark(size: 72, radius: 18, icon: 38),
+                const SizedBox(height: 20),
+                Text(
+                  'FaceStyle',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: scheme.onSurface),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '친구들과 같이 보정하는 단체 사진',
+                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+                ),
+              ],
             ),
           ),
         ),

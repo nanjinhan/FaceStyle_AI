@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../../core/theme/brand.dart';
+import '../../../core/ui/ui.dart';
 import '../../album/data/album_repository.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../room/data/room_repository.dart';
@@ -76,61 +76,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             Text('${user.nickname}님, 반가워요 👋',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          // 메인 CTA — 브랜드 그라데이션 히어로 카드.
-          Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              gradient: Brand.gradient,
-              borderRadius: BorderRadius.circular(Brand.radiusLg),
-              boxShadow: [
-                BoxShadow(
-                  color: Brand.primary.withValues(alpha: 0.3),
-                  blurRadius: 24,
-                  offset: const Offset(0, 12),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.auto_awesome, color: Colors.white, size: 22),
-                    SizedBox(width: 8),
-                    Text('친구들과 같이 보정하기',
-                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '단체사진을 올리면 각자 자기 얼굴을\n실시간으로 보정할 수 있어요.',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.9), height: 1.4),
-                ),
-                const SizedBox(height: 18),
-                GradientButton(
-                  onPressed: _createRoom,
-                  busy: _creating,
-                  gradient: const LinearGradient(colors: [Colors.white, Colors.white]),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_photo_alternate_outlined, color: Brand.primary),
-                      SizedBox(width: 8),
-                      Text('사진 올려서 방 만들기', style: TextStyle(color: Brand.primary)),
-                    ],
-                  ),
-                ),
-              ],
+          // 메인 CTA — shadcn 카드 + solid 버튼.
+          ShadCard(
+            title: '친구들과 같이 보정하기',
+            description: '단체사진을 올리면 각자 자기 얼굴을 실시간으로 보정할 수 있어요.',
+            footer: ShadButton(
+              onPressed: _createRoom,
+              loading: _creating,
+              expanded: true,
+              icon: Icons.add_photo_alternate_outlined,
+              child: const Text('사진 올려서 방 만들기'),
             ),
           ),
           const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.login),
-              title: const Text('초대 코드로 참여'),
-              subtitle: const Text('친구가 보낸 코드를 입력해요'),
-              onTap: () => context.push('/join'),
-            ),
+          ShadCard(
+            onTap: () => context.push('/join'),
+            leading: const Icon(Icons.login),
+            title: '초대 코드로 참여',
+            description: '친구가 보낸 코드를 입력해요',
+            trailing: const Icon(Icons.chevron_right),
           ),
           const SizedBox(height: 24),
           Row(
@@ -164,22 +128,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         padding: EdgeInsets.all(24),
         child: Center(child: CircularProgressIndicator()),
       ),
-      error: (e, _) => Card(
-        child: ListTile(
-          leading: const Icon(Icons.error_outline),
-          title: const Text('앨범을 불러오지 못했어요'),
-          subtitle: Text('$e', maxLines: 2, overflow: TextOverflow.ellipsis),
-          onTap: () => ref.invalidate(myAlbumsProvider),
-        ),
+      error: (e, _) => ShadCard(
+        onTap: () => ref.invalidate(myAlbumsProvider),
+        leading: const Icon(Icons.error_outline),
+        title: '앨범을 불러오지 못했어요',
+        description: '탭해서 다시 시도',
       ),
       data: (albums) {
         if (albums.isEmpty) {
-          return const Card(
-            child: ListTile(
-              leading: Icon(Icons.photo_album_outlined),
-              title: Text('아직 앨범이 없어요'),
-              subtitle: Text('"새 앨범"으로 친구들과 사진을 모아보세요'),
-            ),
+          return const ShadCard(
+            leading: Icon(Icons.photo_album_outlined),
+            title: '아직 앨범이 없어요',
+            description: '"새 앨범"으로 친구들과 사진을 모아보세요',
           );
         }
         return Column(
@@ -187,19 +147,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             for (final a in albums)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Card(
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: Brand.primary.withValues(alpha: 0.12),
-                      foregroundColor: Brand.primary,
-                      child: const Icon(Icons.photo_library_outlined),
-                    ),
-                    title: Text(a.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('사진 ${a.photoCount} · 멤버 ${a.memberCount}'
-                        '${a.role == "owner" ? " · 방장" : ""}'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/albums/${a.id}'),
-                  ),
+                child: ShadCard(
+                  onTap: () => context.push('/albums/${a.id}'),
+                  leading: const Icon(Icons.photo_library_outlined),
+                  title: a.name,
+                  description: '사진 ${a.photoCount} · 멤버 ${a.memberCount}'
+                      '${a.role == "owner" ? " · 방장" : ""}',
+                  trailing: const Icon(Icons.chevron_right),
                 ),
               ),
           ],
