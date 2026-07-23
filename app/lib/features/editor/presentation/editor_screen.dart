@@ -1,11 +1,16 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config.dart';
+import '../../../core/platform/image_saver.dart';
 import '../../../core/theme/member_colors.dart';
 import '../../room/application/room_controller.dart';
 import '../../room/domain/session_models.dart';
 import '../rendering/face_warp.dart';
+import '../rendering/photo_exporter.dart';
 import '../rendering/photo_filter.dart';
 import 'face_overlay.dart';
 
@@ -39,6 +44,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   /// 편집 거부 스낵바 스팸 방지용.
   String? _lastReason;
   DateTime? _lastRejectAt;
+
+  /// 저장(다운로드) 진행 중 여부.
+  bool _saving = false;
 
   String get sessionId => widget.sessionId;
   String get photoId => widget.photoId;
@@ -150,11 +158,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
                 : null,
           ),
           IconButton(
-            icon: const Icon(Icons.download),
+            icon: _saving
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.download),
             tooltip: '내 갤러리에 저장',
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('개인 저장은 렌더링 파이프라인 연동 후 지원돼요 (M4)')),
-            ),
+            onPressed: (state.connection == RoomConnection.connected && !_saving)
+                ? () => _save(context, state)
+                : null,
           ),
           _completeButton(context, state, controller),
         ],
@@ -186,6 +196,62 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       icon: Icon(iAmDone ? Icons.check_circle : Icons.check_circle_outline),
       label: Text(iAmDone ? '완료함' : '완료'),
     );
+  }
+
+  /// 현재 보정 상태를 원본 해상도로 렌더링해 기기에 저장(웹은 다운로드).
+  Future<void> _save(BuildContext context, RoomState state) async {
+    final photo = _photoOf(state);
+    final editState = state.editStates[photoId];
+    if (photo == null || editState == null || photo.width == 0) return;
+
+    setState(() => _saving = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final url = '${AppConfig.apiBaseUrl}${photo.url}';
+      final image = await _loadImage(url);
+      final warps = <FaceWarp>[
+        for (final f in photo.faces)
+          if (f.landmarks != null)
+            FaceWarp(
+              landmarks: f.landmarks!,
+              params: (k) => (editState.valueAt('faces.${f.pathKey}.$k') as num?)?.toDouble() ?? 0,
+            ),
+      ];
+      final bytes = await PhotoExporter.renderPng(
+        image: image,
+        imageSize: Size(photo.width.toDouble(), photo.height.toDouble()),
+        warps: warps,
+        colorMatrix: PhotoFilter.fromEditState(editState),
+      );
+      await saveImageBytes(bytes, 'facestyle_${DateTime.now().millisecondsSinceEpoch}.png');
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('내 갤러리에 저장했어요')));
+    } catch (e) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('저장하지 못했어요: $e')));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<ui.Image> _loadImage(String url) {
+    final completer = Completer<ui.Image>();
+    final stream = NetworkImage(url).resolve(const ImageConfiguration());
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (info, _) {
+        completer.complete(info.image);
+        stream.removeListener(listener);
+      },
+      onError: (e, _) {
+        completer.completeError(e);
+        stream.removeListener(listener);
+      },
+    );
+    stream.addListener(listener);
+    return completer.future;
   }
 
   Widget _body(BuildContext context, WidgetRef ref, RoomState state, RoomController controller) {
