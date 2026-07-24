@@ -1,58 +1,47 @@
 import 'package:flutter/material.dart';
 
-/// shadcn/ui 디자인 언어를 Flutter 테마로 옮긴 것.
-/// 중립(zinc) 팔레트 · 얇은 1px 테두리 · 8px 라운드 · muted 보조텍스트 · 미니멀 컴포넌트.
-///
-/// shadcn은 React/Tailwind라 코드는 못 가져오고, 디자인 토큰과 컴포넌트 스타일을 재현한다.
-abstract final class AppTheme {
-  // ── shadcn 토큰 (zinc) ────────────────────────────────────────────────
-  // Light
-  static const _bgLight = Color(0xFFFFFFFF);
-  static const _fgLight = Color(0xFF09090B); // zinc-950
-  static const _mutedLight = Color(0xFFF4F4F5); // zinc-100
-  static const _mutedFgLight = Color(0xFF71717A); // zinc-500
-  static const _borderLight = Color(0xFFE4E4E7); // zinc-200
-  static const _primaryLight = Color(0xFF18181B); // zinc-900
-  // Dark
-  static const _bgDark = Color(0xFF09090B);
-  static const _fgDark = Color(0xFFFAFAFA);
-  static const _cardDark = Color(0xFF18181B); // zinc-900
-  static const _mutedDark = Color(0xFF27272A); // zinc-800
-  static const _mutedFgDark = Color(0xFFA1A1AA); // zinc-400
-  static const _borderDark = Color(0xFF27272A); // zinc-800
-  static const _primaryDark = Color(0xFFFAFAFA);
+import 'brand.dart';
 
-  static const _danger = Color(0xFFEF4444);
-  static const radius = 8.0; // shadcn --radius (rounded-lg 근처)
+/// FaceStyle 테마 — 보라(바이올렛) 브랜드 + 라벤더 표면 + 부드러운 라운드.
+///
+/// 예약앱류의 모던한 톤을 목표로 한다: 라벤더 화이트 배경, 화이트 카드,
+/// 넉넉한 라운드(16~20px), 보라 포인트, 은은한 그림자. 색·형태 토큰은
+/// [Brand] 를 원본으로 삼고, 여기서 Material 테마로 옮긴다.
+abstract final class AppTheme {
+  static const radius = 14.0; // 버튼·인풋 기본 라운드
+  static const radiusLg = 20.0; // 카드 라운드
 
   static ThemeData get light => _build(Brightness.light);
   static ThemeData get dark => _build(Brightness.dark);
 
   static ThemeData _build(Brightness b) {
     final isLight = b == Brightness.light;
-    final bg = isLight ? _bgLight : _bgDark;
-    final fg = isLight ? _fgLight : _fgDark;
-    final card = isLight ? _bgLight : _cardDark;
-    final muted = isLight ? _mutedLight : _mutedDark;
-    final mutedFg = isLight ? _mutedFgLight : _mutedFgDark;
-    final border = isLight ? _borderLight : _borderDark;
-    final primary = isLight ? _primaryLight : _primaryDark;
-    final onPrimary = isLight ? _bgLight : _fgLight;
+    final bg = isLight ? Brand.canvasLight : Brand.canvasDark;
+    final fg = isLight ? Brand.inkLight : Brand.inkDark;
+    final card = isLight ? Brand.cardLight : Brand.cardDark;
+    final muted = isLight ? Brand.violetSoft : Brand.cardDark;
+    final mutedFg = isLight ? Brand.mutedInkLight : Brand.mutedInkDark;
+    final border = isLight ? Brand.borderLight : Brand.borderDark;
 
     final scheme = ColorScheme(
       brightness: b,
-      primary: primary,
-      onPrimary: onPrimary,
-      secondary: muted,
+      primary: Brand.violet,
+      onPrimary: Colors.white,
+      primaryContainer: Brand.violetSoft,
+      onPrimaryContainer: Brand.violetDark,
+      secondary: isLight ? Brand.violetSoft : Brand.cardDark,
       onSecondary: fg,
-      surface: bg,
+      surface: card,
       onSurface: fg,
-      surfaceContainerHighest: muted,
+      surfaceContainerLowest: bg,
+      surfaceContainerLow: bg,
+      surfaceContainer: muted,
       surfaceContainerHigh: muted,
+      surfaceContainerHighest: muted,
       onSurfaceVariant: mutedFg,
       outline: border,
       outlineVariant: border,
-      error: _danger,
+      error: Brand.danger,
       onError: Colors.white,
     );
 
@@ -70,83 +59,98 @@ abstract final class AppTheme {
         scrolledUnderElevation: 0,
         elevation: 0,
         backgroundColor: bg,
+        surfaceTintColor: Colors.transparent,
         foregroundColor: fg,
-        titleTextStyle: TextStyle(color: fg, fontSize: 18, fontWeight: FontWeight.w600),
+        titleTextStyle: TextStyle(color: fg, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3),
       ),
-      // shadcn Card: 배경 카드색 + 1px 테두리 + 라운드, 그림자 없음
+      // 카드: 화이트 표면 + 큰 라운드 + 아주 옅은 테두리 (그림자는 위젯에서)
       cardTheme: CardThemeData(
         elevation: 0,
         color: card,
+        shadowColor: Brand.violet.withValues(alpha: 0.12),
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
-        shape: rr(radius + 4, BorderSide(color: border)),
+        shape: rr(radiusLg, BorderSide(color: border)),
       ),
-      // Button = default(solid primary)
+      // 기본 버튼 = 보라 solid, 넉넉한 라운드
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: primary,
-          foregroundColor: onPrimary,
-          minimumSize: const Size.fromHeight(44),
+          backgroundColor: Brand.violet,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(52),
           elevation: 0,
           shape: rr(),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: primary,
-          foregroundColor: onPrimary,
-          minimumSize: const Size.fromHeight(44),
+          backgroundColor: Brand.violet,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(52),
           elevation: 0,
+          shadowColor: Colors.transparent,
           shape: rr(),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         ),
       ),
-      // Button = outline
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: fg,
-          minimumSize: const Size.fromHeight(44),
-          side: BorderSide(color: border),
+          foregroundColor: Brand.violetDark,
+          minimumSize: const Size.fromHeight(52),
+          side: BorderSide(color: isLight ? Brand.violetSoft : border),
           shape: rr(),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         ),
       ),
-      // Button = ghost
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: fg,
+          foregroundColor: Brand.violet,
           shape: rr(),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
         ),
       ),
-      // Input
+      // 인풋: 옅은 라벤더/카드 채움 + 라운드, 포커스 시 보라 테두리
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: card,
+        fillColor: isLight ? Brand.violetSoft.withValues(alpha: 0.4) : card,
         hintStyle: TextStyle(color: mutedFg),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(radius), borderSide: BorderSide(color: border)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(radius), borderSide: BorderSide.none),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(radius), borderSide: BorderSide(color: border)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(radius), borderSide: BorderSide(color: fg, width: 1.5)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(radius), borderSide: const BorderSide(color: Brand.violet, width: 1.6)),
       ),
+      // 칩: 알약형. 선택 시 보라 채움.
       chipTheme: ChipThemeData(
         backgroundColor: muted,
-        side: BorderSide(color: border),
-        shape: rr(radius),
-        labelStyle: TextStyle(color: fg, fontSize: 12),
+        selectedColor: Brand.violet,
+        side: BorderSide.none,
+        shape: rr(999),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        labelStyle: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w600),
+        secondaryLabelStyle: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: isLight ? _fgLight : _cardDark,
-        contentTextStyle: TextStyle(color: isLight ? _bgLight : _fgDark),
+        backgroundColor: isLight ? Brand.inkLight : Brand.cardDark,
+        contentTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
         shape: rr(radius),
       ),
-      listTileTheme: ListTileThemeData(iconColor: mutedFg),
-      floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: primary,
-        foregroundColor: onPrimary,
-        elevation: 1,
+      dialogTheme: DialogThemeData(
+        backgroundColor: card,
+        surfaceTintColor: Colors.transparent,
+        shape: rr(radiusLg),
       ),
+      listTileTheme: const ListTileThemeData(iconColor: Brand.violet),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: Brand.violet,
+        foregroundColor: Colors.white,
+        elevation: 4,
+        highlightElevation: 4,
+        shape: rr(18),
+      ),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(color: Brand.violet),
     );
   }
 }

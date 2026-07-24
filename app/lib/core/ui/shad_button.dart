@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/brand.dart';
 import 'ui_tokens.dart';
 
 /// shadcn Button 의 variant (React 의 `variant` prop 재해석).
@@ -111,23 +112,33 @@ class ShadButton extends StatelessWidget {
             );
     }
 
+    // 메인 버튼은 보라 그라데이션 + 소프트 섀도로 강조한다.
+    final useGradient = variant == ShadVariant.primary;
+    final radius = BorderRadius.circular(UiTokens.radius);
+
     final button = Opacity(
       opacity: enabled ? 1 : 0.5,
-      child: Material(
-        color: style.bg,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(UiTokens.radius),
-          side: style.side ?? BorderSide.none,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          boxShadow: useGradient && enabled ? Brand.softShadow(y: 6, blur: 18, opacity: 0.35) : null,
         ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: enabled ? onPressed : null,
-          child: Container(
-            height: _height,
-            padding: EdgeInsets.symmetric(horizontal: size == ShadSize.icon ? 0 : 16),
-            width: size == ShadSize.icon ? _height : null,
-            alignment: Alignment.center,
-            child: content,
+        child: Material(
+          color: useGradient ? Colors.transparent : style.bg,
+          shape: RoundedRectangleBorder(borderRadius: radius, side: style.side ?? BorderSide.none),
+          clipBehavior: Clip.antiAlias,
+          child: Ink(
+            decoration: useGradient ? BoxDecoration(gradient: Brand.gradient, borderRadius: radius) : null,
+            child: InkWell(
+              onTap: enabled ? onPressed : null,
+              child: Container(
+                height: _height,
+                padding: EdgeInsets.symmetric(horizontal: size == ShadSize.icon ? 0 : 16),
+                width: size == ShadSize.icon ? _height : null,
+                alignment: Alignment.center,
+                child: content,
+              ),
+            ),
           ),
         ),
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/brand.dart';
 import '../../../core/ui/ui.dart';
 
 /// 초기 로딩 화면. 저장된 로그인 토큰을 복원하는 동안(AuthStatus.unknown) 표시된다.
@@ -25,7 +26,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      body: Center(
+      body: DecoratedBox(
+        decoration: const BoxDecoration(gradient: Brand.canvasGradient),
+        child: Center(
         child: FadeTransition(
           opacity: _c,
           child: ScaleTransition(
@@ -49,6 +52,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               ],
             ),
           ),
+        ),
         ),
       ),
     );

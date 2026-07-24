@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../theme/brand.dart';
 import 'ui_tokens.dart';
 
-/// shadcn `<Card>` 재해석 — 카드색 배경 + 1px 테두리 + 라운드, 그림자 없음.
+/// 브랜드 카드 — 화이트 표면 + 큰 라운드 + 은은한 보라 섀도.
 ///
 /// shadcn 은 Card > CardHeader(CardTitle/CardDescription) > CardContent > CardFooter
 /// 구조다. 아래처럼 슬롯으로 조립하거나, [child] 하나만 넘겨도 된다.
@@ -55,14 +56,21 @@ class ShadCard extends StatelessWidget {
       ),
     );
 
-    return Material(
-      color: scheme.surface,
-      shape: RoundedRectangleBorder(
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return DecoratedBox(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(UiTokens.radiusLg),
-        side: BorderSide(color: scheme.outline),
+        boxShadow: isLight ? Brand.softShadow(y: 8, blur: 24, opacity: 0.07) : null,
       ),
-      clipBehavior: Clip.antiAlias,
-      child: onTap == null ? body : InkWell(onTap: onTap, child: body),
+      child: Material(
+        color: scheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UiTokens.radiusLg),
+          side: BorderSide(color: scheme.outline),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: onTap == null ? body : InkWell(onTap: onTap, child: body),
+      ),
     );
   }
 
