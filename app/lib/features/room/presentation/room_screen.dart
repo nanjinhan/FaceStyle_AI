@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/config.dart';
 import '../../../core/theme/member_colors.dart';
+import '../../../core/ui/ui.dart';
 import '../application/room_controller.dart';
 import '../domain/session_models.dart';
 
@@ -136,56 +137,64 @@ class RoomScreen extends ConsumerWidget {
   }
 
   Widget _inviteCard(BuildContext context, SessionDetail session) {
-    return Card(
-      child: ListTile(
-        leading: const Icon(Icons.qr_code_2),
-        title: Text('초대 코드  ${session.inviteCode}'),
-        subtitle: const Text('탭하면 코드를 복사해요'),
-        trailing: const Icon(Icons.copy, size: 18),
-        onTap: () async {
-          await Clipboard.setData(ClipboardData(text: session.inviteCode));
-          if (context.mounted) {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(const SnackBar(content: Text('초대 코드를 복사했어요')));
-          }
-        },
-      ),
+    return ShadCard(
+      leading: const Icon(Icons.qr_code_2),
+      title: '초대 코드  ${session.inviteCode}',
+      description: '탭하면 코드를 복사해요',
+      trailing: const Icon(Icons.copy, size: 18),
+      onTap: () async {
+        await Clipboard.setData(ClipboardData(text: session.inviteCode));
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('초대 코드를 복사했어요')));
+        }
+      },
     );
   }
 
   Widget _photoTile(BuildContext context, Photo photo) {
     final url = '${AppConfig.apiBaseUrl}${photo.url}';
     final claimed = photo.faces.where((f) => f.isClaimed).length;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => context.push('/rooms/$sessionId/photos/${photo.id}/edit'),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AspectRatio(
-              aspectRatio: photo.width == 0 ? 16 / 9 : photo.width / photo.height,
-              child: Image.network(
-                url,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const ColoredBox(
-                  color: Colors.black12,
-                  child: Center(child: Icon(Icons.broken_image_outlined)),
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: scheme.surface,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UiTokens.radiusLg),
+          side: BorderSide(color: scheme.outline),
+        ),
+        child: InkWell(
+          onTap: () => context.push('/rooms/$sessionId/photos/${photo.id}/edit'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AspectRatio(
+                aspectRatio: photo.width == 0 ? 16 / 9 : photo.width / photo.height,
+                child: Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const ColoredBox(
+                    color: Colors.black12,
+                    child: Center(child: Icon(Icons.broken_image_outlined)),
+                  ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Text('얼굴 ${photo.faces.length} · 클레임 $claimed'),
-                  const Spacer(),
-                  const Text('보정하기'),
-                  const Icon(Icons.chevron_right),
-                ],
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Text('얼굴 ${photo.faces.length} · 클레임 $claimed',
+                        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+                    const Spacer(),
+                    Text('보정하기', style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurface)),
+                    Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

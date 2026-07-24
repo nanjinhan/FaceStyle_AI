@@ -49,6 +49,12 @@ class AlbumRepository {
     );
   }
 
+  /// 방장 마감 — 미완료 사진을 현재 상태로 확정 (명세 4장).
+  Future<AlbumDetail> closePhoto(String albumId, String albumPhotoId) async {
+    await _api.post('/albums/$albumId/photos/$albumPhotoId/close');
+    return get(albumId); // 갱신된 상세를 다시 불러온다
+  }
+
   /// 사진 여러 장 업로드 (멀티파트).
   Future<AlbumDetail> uploadPhotos(String albumId, List<({String filename, Uint8List bytes})> photos) async {
     final token = _api.userToken;

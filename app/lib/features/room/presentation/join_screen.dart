@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/ui/ui.dart';
 import '../../auth/application/auth_controller.dart';
 import '../data/room_repository.dart';
 
@@ -75,40 +76,31 @@ class _JoinScreenState extends ConsumerState<JoinScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('방 참여')),
       body: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextField(
+            ShadInput(
               controller: _invite,
-              decoration: const InputDecoration(
-                labelText: '초대 코드',
-                hintText: '예: 4N1XUV',
-                border: OutlineInputBorder(),
-              ),
+              label: '초대 코드',
+              hint: '예: 4N1XUV',
+              error: isGuest ? null : _error,
             ),
             if (isGuest) ...[
               const SizedBox(height: 16),
-              TextField(
+              ShadInput(
                 controller: _nickname,
-                decoration: const InputDecoration(
-                  labelText: '닉네임',
-                  hintText: '닉네임만 정하면 바로 들어갈 수 있어요',
-                  border: OutlineInputBorder(),
-                ),
+                label: '닉네임',
+                hint: '닉네임만 정하면 바로 들어갈 수 있어요',
+                error: _error,
               ),
             ],
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ],
             const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _busy ? null : _join,
-              child: _busy
-                  ? const SizedBox(
-                      height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('참여하기'),
+            ShadButton(
+              onPressed: _join,
+              loading: _busy,
+              expanded: true,
+              child: const Text('참여하기'),
             ),
           ],
         ),

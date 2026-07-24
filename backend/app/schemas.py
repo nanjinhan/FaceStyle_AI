@@ -107,6 +107,11 @@ class AlbumPhotoOut(BaseModel):
     uploaderUserId: str
     finalized: bool = False
     createdAt: datetime
+    # 진행 상태 (명세 4장 "진행 상태 아이콘 — 클레임 인원 기준 2/3 완료")
+    status: str = "waiting"  # waiting | editing | done
+    claimedCount: int = 0  # 이 사진에서 얼굴을 지정한 인원(분모)
+    doneCount: int = 0     # 그중 완료 체크한 인원(분자)
+    myTodo: bool = False   # 내가 지정한 얼굴이 있는데 아직 완료 안 함
 
 
 class AlbumSummary(BaseModel):

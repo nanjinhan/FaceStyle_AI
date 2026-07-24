@@ -39,12 +39,50 @@ def _member_out(m: models.AlbumMember) -> schemas.AlbumMemberOut:
     )
 
 
-def _photo_out(p: models.AlbumPhoto) -> schemas.AlbumPhotoOut:
+def _photo_out(db: Session, p: models.AlbumPhoto, me_id: str) -> schemas.AlbumPhotoOut:
+    """앨범 사진 상태를 계산한다.
+
+    상태 정의(명세 4장 "클레임 인원 기준"):
+      - claimed = 이 사진에서 얼굴을 지정한 멤버 수(분모)
+      - done    = 그중 완료 체크한 멤버 수(분자)
+      - waiting: 아직 아무도 지정 안 함 / editing: 지정했지만 미완 / done: 전원 완료
+      - myTodo : 내가 지정한 얼굴이 있는데 아직 완료 안 함 → "내가 보정할 사진"
+    """
+    claimed_members: set[str] = set()
+    done_members: set[str] = set()
+    my_member_ids: set[str] = set()
+
+    if p.photo_id is not None:
+        photo = db.get(models.Photo, p.photo_id)
+        if photo is not None:
+            # 이 세션에서 현재 유저의 member id들(재접속으로 여러 개일 수 있음)
+            my_member_ids = {
+                m.id for m in photo.session.members
+                if m.user_id == me_id and m.left_at is None
+            } if photo.session else set()
+            claimed_members = {f.claimed_by_member_id for f in photo.faces if f.claimed_by_member_id}
+            done_members = {c.member_id for c in photo.completions}
+
+    claimed = len(claimed_members)
+    done = len(claimed_members & done_members)
+    finalized = p.finalized_at is not None
+    if finalized or (claimed > 0 and done >= claimed):
+        status = "done"
+    elif claimed > 0:
+        status = "editing"
+    else:
+        status = "waiting"
+    # 내가 지정한 얼굴이 있는데 아직 완료 안 했으면 할 일
+    my_claimed = bool(claimed_members & my_member_ids)
+    my_done = bool(done_members & my_member_ids)
+    my_todo = my_claimed and not my_done and not finalized
+
     return schemas.AlbumPhotoOut(
         id=p.id, url=p.url, width=p.width, height=p.height,
         uploaderUserId=p.uploader_user_id,
-        finalized=p.finalized_at is not None,
+        finalized=finalized,
         createdAt=p.created_at,
+        status=status, claimedCount=claimed, doneCount=done, myTodo=my_todo,
     )
 
 
@@ -56,7 +94,7 @@ def _detail(db: Session, album: models.Album, me: models.User) -> schemas.AlbumD
         inviteToken=album.invite_token, inviteCode=album.invite_code,
         myRole=my.role if my else "member",
         members=[_member_out(m) for m in album.members],
-        photos=[_photo_out(p) for p in photos],
+        photos=[_photo_out(db, p, me.id) for p in photos],
     )
 
 
@@ -254,6 +292,38 @@ def open_album_photo_editor(
 
     token = security.create_member_token(member.id, session.id)
     return schemas.EditSessionHandle(sessionId=session.id, photoId=photo.id, memberToken=token)
+
+
+@router.post("/{album_id}/photos/{album_photo_id}/close", response_model=schemas.AlbumPhotoOut)
+def close_album_photo(
+    album_id: str,
+    album_photo_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """방장 마감 — 미완료 사진을 현재 상태로 강제 확정한다 (명세 4장 "방장 마감")."""
+    album = db.get(models.Album, album_id)
+    if album is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "앨범을 찾을 수 없어요")
+    m = _membership(db, album_id, current_user.id)
+    if m.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "방장만 마감할 수 있어요")
+
+    ap = db.get(models.AlbumPhoto, album_photo_id)
+    if ap is None or ap.album_id != album_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "사진을 찾을 수 없어요")
+    if ap.finalized_at is None:
+        ap.finalized_at = datetime.utcnow()
+        # 편집 세션이 있으면 그 사진도 확정해 편집을 잠근다.
+        if ap.photo_id is not None:
+            photo = db.get(models.Photo, ap.photo_id)
+            if photo is not None and photo.finalized_at is None:
+                state = edit_state_store.get(db, photo.id)
+                photo.finalized_at = datetime.utcnow()
+                photo.final_version = state.version
+        db.commit()
+        db.refresh(ap)
+    return _photo_out(db, ap, current_user.id)
 
 
 @router.post("/{album_id}/leave", status_code=status.HTTP_204_NO_CONTENT)

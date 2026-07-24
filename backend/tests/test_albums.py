@@ -157,6 +157,52 @@ class TestEditSession:
         assert res.status_code == 403
 
 
+class TestPhotoStatus:
+    """앨범 사진 진행 상태 (명세 4장 대기/보정중/완료 2/3)."""
+
+    def _album_with_photo(self, client):
+        token, uid = make_user(client, "지우")
+        album = create_album(client, token)
+        files = [("files", ("p.png", PNG_1X1, "image/png"))]
+        d = client.post(f"/albums/{album['id']}/photos", files=files, headers=auth_header(token)).json()
+        return token, uid, album, d["photos"][0]
+
+    def test_새_사진은_대기_상태다(self, client):
+        _t, _u, _a, photo = self._album_with_photo(client)
+        assert photo["status"] == "waiting"
+        assert photo["claimedCount"] == 0 and photo["doneCount"] == 0
+        assert photo["myTodo"] is False
+
+    def test_클레임하면_보정중_할일이_된다(self, client):
+        from conftest import add_face, claim_face, host_member_token
+        token, _uid, album, photo = self._album_with_photo(client)
+        # 편집 세션 생성
+        h = client.post(f"/albums/{album['id']}/photos/{photo['id']}/edit-session", headers=auth_header(token)).json()
+        # 그 세션 사진에 얼굴 추가 + 내 멤버로 클레임
+        face_id = add_face(h["photoId"])
+        claim_face(client, h["sessionId"], h["photoId"], face_id, h["memberToken"])
+
+        detail = client.get(f"/albums/{album['id']}", headers=auth_header(token)).json()
+        p = detail["photos"][0]
+        assert p["status"] == "editing"
+        assert p["claimedCount"] == 1 and p["doneCount"] == 0
+        assert p["myTodo"] is True  # 내가 지정했지만 미완 → 할 일
+
+    def test_방장_마감하면_완료로_잠긴다(self, client):
+        token, _uid, album, photo = self._album_with_photo(client)
+        res = client.post(f"/albums/{album['id']}/photos/{photo['id']}/close", headers=auth_header(token))
+        assert res.status_code == 200
+        assert res.json()["status"] == "done"
+        assert res.json()["finalized"] is True
+
+    def test_방장이_아니면_마감_못한다(self, client):
+        owner, _uid, album, photo = self._album_with_photo(client)
+        guest, _ = make_user(client, "수진")
+        client.post("/albums/join", json={"invite": album["inviteCode"]}, headers=auth_header(guest))
+        res = client.post(f"/albums/{album['id']}/photos/{photo['id']}/close", headers=auth_header(guest))
+        assert res.status_code == 403
+
+
 class TestMembershipRules:
     def test_멤버가_아니면_상세를_못_본다(self, client):
         owner, _ = make_user(client, "지우")

@@ -53,6 +53,10 @@ class AlbumPhotoInfo {
     required this.width,
     required this.height,
     required this.finalized,
+    this.status = 'waiting',
+    this.claimedCount = 0,
+    this.doneCount = 0,
+    this.myTodo = false,
   });
   final String id;
   final String url;
@@ -60,12 +64,22 @@ class AlbumPhotoInfo {
   final int height;
   final bool finalized;
 
+  /// waiting | editing | done
+  final String status;
+  final int claimedCount; // 분모(얼굴 지정 인원)
+  final int doneCount; // 분자(완료 인원)
+  final bool myTodo; // 내가 보정해야 하는 사진
+
   factory AlbumPhotoInfo.fromJson(Map<String, dynamic> j) => AlbumPhotoInfo(
         id: j['id'] as String,
         url: j['url'] as String,
         width: j['width'] as int,
         height: j['height'] as int,
         finalized: j['finalized'] as bool? ?? false,
+        status: j['status'] as String? ?? 'waiting',
+        claimedCount: j['claimedCount'] as int? ?? 0,
+        doneCount: j['doneCount'] as int? ?? 0,
+        myTodo: j['myTodo'] as bool? ?? false,
       );
 }
 

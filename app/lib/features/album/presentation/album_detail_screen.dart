@@ -24,6 +24,7 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
   AlbumDetail? _album;
   Object? _error;
   bool _uploading = false;
+  bool _todoOnly = false; // "내가 보정할 사진"만 보기
 
   @override
   void initState() {
@@ -91,8 +92,15 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
       appBar: AppBar(
         title: Text(album?.name ?? '앨범'),
         actions: [
-          if (album != null)
+          if (album != null) ...[
+            IconButton(
+              icon: Icon(_todoOnly ? Icons.filter_alt : Icons.filter_alt_outlined),
+              tooltip: '내가 보정할 사진만',
+              isSelected: _todoOnly,
+              onPressed: () => setState(() => _todoOnly = !_todoOnly),
+            ),
             IconButton(icon: const Icon(Icons.person_add_alt), tooltip: '초대', onPressed: _shareInvite),
+          ],
         ],
       ),
       body: _body(context, album),
@@ -118,17 +126,21 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
     }
     if (album == null) return const Center(child: CircularProgressIndicator());
 
+    final photos = _todoOnly ? album.photos.where((p) => p.myTodo).toList() : album.photos;
+
     return RefreshIndicator(
       onRefresh: _load,
       child: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(child: _memberBar(context, album)),
-          if (album.photos.isEmpty)
-            const SliverFillRemaining(
+          if (photos.isEmpty)
+            SliverFillRemaining(
               hasScrollBody: false,
               child: _Notice(
-                icon: Icons.add_photo_alternate_outlined,
-                message: '아직 올라온 사진이 없어요.\n"사진 올리기"로 추가해 보세요.',
+                icon: _todoOnly ? Icons.check_circle_outline : Icons.add_photo_alternate_outlined,
+                message: _todoOnly
+                    ? '보정할 사진이 없어요.\n다 하셨네요 👍'
+                    : '아직 올라온 사진이 없어요.\n"사진 올리기"로 추가해 보세요.',
               ),
             )
           else
@@ -139,8 +151,8 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
                   crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8,
                 ),
                 delegate: SliverChildBuilderDelegate(
-                  (context, i) => _photoTile(album.photos[i]),
-                  childCount: album.photos.length,
+                  (context, i) => _photoTile(album, photos[i]),
+                  childCount: photos.length,
                 ),
               ),
             ),
@@ -165,9 +177,11 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
     );
   }
 
-  Widget _photoTile(AlbumPhotoInfo p) {
+  Widget _photoTile(AlbumDetail album, AlbumPhotoInfo p) {
     return GestureDetector(
       onTap: () => _openPhoto(p),
+      // 방장은 길게 눌러 마감할 수 있다.
+      onLongPress: album.amOwner && !p.finalized ? () => _confirmClose(p) : null,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: Stack(
@@ -179,16 +193,63 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
               errorBuilder: (_, _, _) =>
                   Container(color: Colors.black12, child: const Icon(Icons.broken_image_outlined)),
             ),
-            if (p.finalized)
-              const Positioned(
-                right: 4,
-                top: 4,
-                child: Icon(Icons.check_circle, color: Colors.white, size: 20),
+            // 내가 보정할 사진 표시(테두리)
+            if (p.myTodo)
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Theme.of(context).colorScheme.primary, width: 2.5),
+                  ),
+                ),
               ),
+            // 상태 뱃지 (좌상단)
+            Positioned(left: 4, top: 4, child: _statusBadge(p)),
           ],
         ),
       ),
     );
+  }
+
+  Widget _statusBadge(AlbumPhotoInfo p) {
+    final (String label, Color bg) = switch (p.status) {
+      'done' => ('완료', const Color(0xFF16A34A)),
+      'editing' => ('${p.doneCount}/${p.claimedCount}', const Color(0xFFEA580C)),
+      _ => ('대기', Colors.black54),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (p.status == 'done') const Icon(Icons.check, size: 11, color: Colors.white),
+          if (p.status == 'done') const SizedBox(width: 2),
+          Text(label, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmClose(AlbumPhotoInfo p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('이 사진을 마감할까요?'),
+        content: const Text('아직 안 한 친구가 있어요. 지금 상태로 최종본을 확정하고 편집을 잠급니다.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('마감')),
+        ],
+      ),
+    );
+    if (!(ok ?? false)) return;
+    try {
+      final album = await ref.read(albumRepositoryProvider).closePhoto(widget.albumId, p.id);
+      if (mounted) setState(() => _album = album);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('마감 실패: $e')));
+    }
   }
 }
 
